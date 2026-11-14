@@ -1,7 +1,9 @@
 require 'commander'
 require 'fastlane/version'
+require 'fastlane_core/ui/help_formatter'
 
 require_relative 'download_screenshots'
+require_relative 'download_app_clip_header_images'
 require_relative 'options'
 require_relative 'module'
 require_relative 'generate_summary'
@@ -40,6 +42,7 @@ module Deliver
       res
     end
 
+    # rubocop:disable Metrics/PerceivedComplexity
     def run
       program :name, 'deliver'
       program :version, Fastlane::VERSION
@@ -47,9 +50,10 @@ module Deliver
       program :help, 'Author', 'Felix Krause <deliver@krausefx.com>'
       program :help, 'Website', 'https://fastlane.tools'
       program :help, 'Documentation', 'https://docs.fastlane.tools/actions/deliver/'
-      program :help_formatter, :compact
+      program :help_formatter, FastlaneCore::HelpFormatter
 
       global_option('--verbose') { FastlaneCore::Globals.verbose = true }
+      global_option('--env STRING[,STRING2]', String, 'Add environment(s) to use with `dotenv`')
 
       always_trace!
 
@@ -129,7 +133,7 @@ module Deliver
           Deliver::Runner.new(options)
           html_path = Deliver::GenerateSummary.new.run(options)
           UI.success("Successfully generated HTML report at '#{html_path}'")
-          system("open '#{html_path}'") unless options[:force]
+          system("open", html_path) unless options[:force]
         end
       end
 
@@ -149,6 +153,22 @@ module Deliver
         end
       end
 
+      command :download_app_clip_header_images do |c|
+        c.syntax = 'fastlane deliver download_app_clip_header_images'
+        c.description = "Downloads all existing app clip header images from App Store Connect and stores them in the app_clip_header_images folder"
+
+        FastlaneCore::CommanderGenerator.new.generate(deliverfile_options, command: c)
+
+        c.action do |args, options|
+          options = FastlaneCore::Configuration.create(deliverfile_options(skip_verification: true), options.__hash__)
+          options.load_configuration_file("Deliverfile")
+          Deliver::Runner.new(options, skip_version: true) # to login...
+          containing = FastlaneCore::Helper.fastlane_enabled_folder_path
+          path = options[:app_clip_header_images_path] || File.join(containing, 'app_clip_header_images')
+          Deliver::DownloadAppClipHeaderImages.run(options, path)
+        end
+      end
+
       command :download_metadata do |c|
         c.syntax = 'fastlane deliver download_metadata'
         c.description = "Downloads existing metadata and stores it locally. This overwrites the local files."
@@ -165,15 +185,17 @@ module Deliver
           return 0 unless res
 
           require 'deliver/setup'
-          v = options[:app].latest_version
+          app = Deliver.cache[:app]
+          platform = Spaceship::ConnectAPI::Platform.map(options[:platform])
+          v = app.get_latest_app_store_version(platform: platform)
           if options[:app_version].to_s.length > 0
-            v = options[:app].live_version if v.version != options[:app_version]
-            if v.version != options[:app_version]
+            v = app.get_live_app_store_version(platform: platform) if v.version_string != options[:app_version]
+            if v.nil? || v.version_string != options[:app_version]
               raise "Neither the current nor live version match specified app_version \"#{options[:app_version]}\""
             end
           end
 
-          Deliver::Setup.new.generate_metadata_files(v, path)
+          Deliver::Setup.new.generate_metadata_files(app, v, path, options)
         end
       end
 

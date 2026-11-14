@@ -1,11 +1,15 @@
 module Fastlane
   module Actions
+    module SharedValues
+      FL_CHANGELOG ||= :FL_CHANGELOG # originally defined in ChangelogFromGitCommitsAction
+    end
+
     class MakeChangelogFromJenkinsAction < Action
       def self.run(params)
         require 'json'
         require 'net/http'
 
-        changelog = ""
+        changelog = +""
 
         if Helper.ci? || Helper.test?
           # The "BUILD_URL" environment variable is set automatically by Jenkins in every build
@@ -41,7 +45,7 @@ module Fastlane
           FastlaneCore::ConfigItem.new(key: :include_commit_body,
                                        description: "Include the commit body along with the summary",
                                        optional: true,
-                                       is_string: false,
+                                       type: Boolean,
                                        default_value: true)
         ]
       end

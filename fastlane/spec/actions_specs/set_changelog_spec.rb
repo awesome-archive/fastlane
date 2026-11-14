@@ -7,7 +7,7 @@ describe Fastlane do
         it 'raises a Fastlane error' do
           expect { Fastlane::FastFile.new.parse(invalidPlatform_lane).runner.execute(:test) }.to(
             raise_error(FastlaneCore::Interface::FastlaneError) do |error|
-              expect(error.message).to match(/Invalid platform 'whatever', must be ios, appletvos, mac/)
+              expect(error.message).to match(/Invalid platform 'whatever', must be ios, appletvos, xros, mac/)
             end
           )
         end
@@ -17,9 +17,9 @@ describe Fastlane do
         let(:validPlatform_lane) { "lane :test do set_changelog(app_identifier: 'x.y.z', platform: 'ios', changelog: 'custom changelog', username: 'name@example.com') end" }
 
         it 'raises a Fastlane error' do
-          allow(Spaceship::Tunes).to receive(:login).and_return(true)
-          allow(Spaceship::Tunes).to receive(:select_team).and_return(true)
-          allow(Spaceship::Application).to receive(:find).and_return(nil)
+          allow(Spaceship::ConnectAPI).to receive(:login).and_return(true)
+          allow(Spaceship::ConnectAPI).to receive(:select_team).and_return(true)
+          allow(Spaceship::ConnectAPI::App).to receive(:find).and_return(nil)
 
           expect { Fastlane::FastFile.new.parse(validPlatform_lane).runner.execute(:test) }.to(
             raise_error(FastlaneCore::Interface::FastlaneError) do |error|

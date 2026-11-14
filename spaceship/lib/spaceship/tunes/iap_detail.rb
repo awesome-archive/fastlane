@@ -30,6 +30,10 @@ module Spaceship
       # @return (Bool) Cleared for sale flag
       attr_accessor :cleared_for_sale
 
+      # @return (Hash) app store promotion image (optional)
+      attr_accessor :merch_screenshot
+
+      # @return (Hash) app review screenshot (required)
       attr_accessor :review_screenshot
 
       # @return (String) the notes for the review team
@@ -76,7 +80,9 @@ module Spaceship
           language = localized_version["value"]["localeCode"]
           parsed_versions[language.to_sym] = {
             name: localized_version["value"]["name"]["value"],
-            description: localized_version["value"]["description"]["value"]
+            description: localized_version["value"]["description"]["value"],
+            id: localized_version["value"]["id"],
+            status: localized_version["value"]["status"]
           }
         end
         return parsed_versions
@@ -94,7 +100,8 @@ module Spaceship
             "value" =>   {
               "name" =>  { "value" => current_version[:name] },
               "description" =>  { "value" => current_version[:description] },
-              "localeCode" =>  language.to_s
+              "localeCode" => language.to_s,
+              "id" => current_version[:id]
             }
           }
         end
@@ -142,6 +149,12 @@ module Spaceship
         Tunes::IAPStatus.get_from_string(raw_data["versions"].first["status"])
       end
 
+      # @return (Hash) Hash containing existing promotional image data
+      def merch_screenshot
+        return nil unless raw_data && raw_data["versions"] && raw_data["versions"].first && raw_data["versions"].first["merch"] && raw_data["versions"].first["merch"]["images"].first["image"]["value"]
+        raw_data["versions"].first["merch"]["images"].first["image"]["value"]
+      end
+
       # @return (Hash) Hash containing existing review screenshot data
       def review_screenshot
         return nil unless raw_data && raw_data["versions"] && raw_data["versions"].first && raw_data["versions"].first["reviewScreenshot"] && raw_data['versions'].first["reviewScreenshot"]["value"]
@@ -157,7 +170,8 @@ module Spaceship
                     "value" =>  {
                       "description" => { "value" => value[:description] },
                       "name" => { "value" => value[:name] },
-                      "localeCode" => language.to_s
+                      "localeCode" => language.to_s,
+                      "id" => value[:id]
                     }
           }
         end
@@ -171,6 +185,13 @@ module Spaceship
                                                     subscription_price_target)
         raw_data.set(["pricingIntervals"], raw_pricing_intervals)
         @raw_pricing_data["subscriptions"] = raw_pricing_intervals if @raw_pricing_data
+
+        if @merch_screenshot
+          # Upload App Store Promotional image (Optional)
+          upload_file = UploadFile.from_path(@merch_screenshot)
+          merch_data = client.upload_purchase_merch_screenshot(application.apple_id, upload_file)
+          raw_data["versions"][0]["merch"] = merch_data
+        end
 
         if @review_screenshot
           # Upload Screenshot
@@ -199,7 +220,7 @@ module Spaceship
       #   if the iap is not yet cleared for sale
       # @return ([Spaceship::Tunes::PricingInfo]) An array of pricing infos from the same pricing tier
       #   if the iap uses world wide pricing
-      # @return ([Spaceship::Tunes::IAPSubscriptionPricingInfo]) An array of pricing infos from multple subscription pricing tiers
+      # @return ([Spaceship::Tunes::IAPSubscriptionPricingInfo]) An array of pricing infos from multiple subscription pricing tiers
       #   if the iap uses territorial pricing
       def pricing_info
         return [] unless cleared_for_sale
@@ -209,7 +230,7 @@ module Spaceship
 
       private
 
-      # Checks wheather an iap uses world wide or territorial pricing.
+      # Checks whether an iap uses world wide or territorial pricing.
       #
       # @return (true, false)
       def world_wide_pricing?
@@ -221,7 +242,7 @@ module Spaceship
       # @return ([Spaceship::Tunes::PricingInfo]) An array of pricing infos from the same tier
       def world_wide_pricing_info
         client
-          .pricing_tiers
+          .pricing_tiers(application.apple_id)
           .find { |p| p.tier_stem == pricing_intervals.first[:tier].to_s }
           .pricing_info
       end

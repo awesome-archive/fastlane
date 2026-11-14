@@ -1,10 +1,11 @@
 module Fastlane
   module Actions
     module SharedValues
-      VERSION_NUMBER = :VERSION_NUMBER
+      VERSION_NUMBER ||= :VERSION_NUMBER
     end
 
     class IncrementVersionNumberAction < Action
+      require 'fastlane/helper/xcodeproj_helper'
       require 'shellwords'
 
       def self.is_supported?(platform)
@@ -23,38 +24,51 @@ module Fastlane
           '&&'
         ].join(' ')
 
+        version_number_build_setting = nil
+
         begin
           current_version = Actions
                             .sh("#{command_prefix} agvtool what-marketing-version -terse1", log: FastlaneCore::Globals.verbose?)
                             .split("\n")
                             .last
                             .strip
+
+          if current_version =~ /\$\(([\w\-]+)\)/ || current_version =~ /\$\{([\w\-]+)\}/
+            version_number_build_setting = $1
+            UI.verbose("agvtool returned #{current_version}, resolving it...")
+            current_version = GetVersionNumberAction.run(xcodeproj: params[:xcodeproj])
+          end
         rescue
           current_version = ''
         end
 
-        version_regex = /^\d+\.\d+\.\d+$/
         if params[:version_number]
-          UI.verbose("Your current version (#{current_version}) does not respect the format A.B.C") unless current_version =~ version_regex
+          UI.verbose(version_format_error(current_version)) unless current_version =~ version_regex
 
           # Specific version
           next_version_number = params[:version_number]
         else
-          UI.user_error!("Your current version (#{current_version}) does not respect the format A.B.C") unless current_version =~ version_regex
+          UI.user_error!(version_format_error(current_version)) unless current_version =~ version_regex
           version_array = current_version.split(".").map(&:to_i)
 
           case params[:bump_type]
+          when "bump"
+            version_array[-1] = version_array[-1] + 1
+            next_version_number = version_array.join(".")
           when "patch"
+            UI.user_error!(version_token_error) if version_array.count < 3
             version_array[2] = version_array[2] + 1
             next_version_number = version_array.join(".")
           when "minor"
+            UI.user_error!(version_token_error) if version_array.count < 2
             version_array[1] = version_array[1] + 1
-            version_array[2] = version_array[2] = 0
+            version_array[2] = 0 if version_array[2]
             next_version_number = version_array.join(".")
           when "major"
+            UI.user_error!(version_token_error) if version_array.count == 0
             version_array[0] = version_array[0] + 1
-            version_array[1] = version_array[1] = 0
-            version_array[1] = version_array[2] = 0
+            version_array[1] = 0 if version_array[1]
+            version_array[2] = 0 if version_array[2]
             next_version_number = version_array.join(".")
           when "specific_version"
             next_version_number = specific_version_number
@@ -63,13 +77,19 @@ module Fastlane
 
         command = [
           command_prefix,
-          "agvtool new-marketing-version #{next_version_number.to_s.strip}"
+          "agvtool new-marketing-version #{next_version_number.to_s.strip.shellescape}"
         ].join(' ')
 
         if Helper.test?
           Actions.lane_context[SharedValues::VERSION_NUMBER] = command
         else
           Actions.sh(command)
+          version_number_build_setting ||= "MARKETING_VERSION"
+          update_project_version_build_setting(
+            params[:xcodeproj],
+            version_number_build_setting,
+            next_version_number.to_s.strip
+          )
           Actions.lane_context[SharedValues::VERSION_NUMBER] = next_version_number
         end
 
@@ -77,6 +97,36 @@ module Fastlane
       rescue => ex
         UI.error('Before being able to increment and read the version number from your Xcode project, you first need to setup your project properly. Please follow the guide at https://developer.apple.com/library/content/qa/qa1827/_index.html')
         raise ex
+      end
+
+      def self.version_regex
+        /^\d+(\.\d+){0,2}$/
+      end
+
+      def self.version_format_error(version)
+        "Your current version (#{version}) does not respect the format A or A.B or A.B.C"
+      end
+
+      def self.version_token_error
+        "Can't increment version"
+      end
+
+      def self.update_project_version_build_setting(xcodeproj_path_or_dir, build_setting, version_number)
+        project_path_or_dir = xcodeproj_path_or_dir
+        if project_path_or_dir.nil?
+          xcodeproj_paths = Dir.glob("./*.xcodeproj")
+          return if xcodeproj_paths.empty?
+
+          if xcodeproj_paths.size > 1
+            return
+          end
+
+          project_path_or_dir = xcodeproj_paths.first
+        end
+
+        project = Fastlane::Helper::XcodeprojHelper.get_project!(project_path_or_dir)
+        changed = Fastlane::Helper::XcodeprojHelper.update_project_build_setting(project, build_setting, version_number)
+        project.save if changed[:project]
       end
 
       def self.description
@@ -95,9 +145,9 @@ module Fastlane
           FastlaneCore::ConfigItem.new(key: :bump_type,
                                        env_name: "FL_VERSION_NUMBER_BUMP_TYPE",
                                        description: "The type of this version bump. Available: patch, minor, major",
-                                       default_value: "patch",
+                                       default_value: "bump",
                                        verify_block: proc do |value|
-                                         UI.user_error!("Available values are 'patch', 'minor' and 'major'") unless ['patch', 'minor', 'major'].include?(value)
+                                         UI.user_error!("Available values are 'patch', 'minor' and 'major'") unless ['bump', 'patch', 'minor', 'major'].include?(value)
                                        end),
           FastlaneCore::ConfigItem.new(key: :version_number,
                                        env_name: "FL_VERSION_NUMBER_VERSION_NUMBER",
@@ -134,7 +184,7 @@ module Fastlane
 
       def self.example_code
         [
-          'increment_version_number # Automatically increment patch version number',
+          'increment_version_number # Automatically increment version number',
           'increment_version_number(
             bump_type: "patch" # Automatically increment patch version number
           )',

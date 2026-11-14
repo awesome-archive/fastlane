@@ -30,6 +30,9 @@ module Snapshot
 
       Snapshot.project.select_scheme(preferred_to_include: "UITests")
 
+      coerce_to_array_of_strings(:only_testing)
+      coerce_to_array_of_strings(:skip_testing)
+
       # Devices
       if config[:devices].nil? && !Snapshot.project.mac?
         config[:devices] = []
@@ -63,9 +66,21 @@ module Snapshot
 
           config[:devices] << sim.name
         end
-      elsif Snapshot.project.mac?
+      elsif config[:devices].nil? && Snapshot.project.mac?
         config[:devices] = ["Mac"]
       end
+    end
+
+    def self.coerce_to_array_of_strings(config_key)
+      config_value = Snapshot.config[config_key]
+
+      return if config_value.nil?
+
+      # splitting on comma allows us to support comma-separated lists of values
+      # from the command line, even though the ConfigItem is not defined as an
+      # Array type
+      config_value = config_value.split(',') unless config_value.kind_of?(Array)
+      Snapshot.config[config_key] = config_value.map(&:to_s)
     end
   end
 end

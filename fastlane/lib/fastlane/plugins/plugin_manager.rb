@@ -66,6 +66,15 @@ module Fastlane
       end
     end
 
+    # Returns the fastlane plugins the given gem depends on, directly or through other gems
+    def plugins_required_by(gem_name)
+      rubygem = Bundler.rubygems.find_name(gem_name).first
+      return [] unless rubygem
+      collect_bundler_runtime_dependencies([], rubygem).map(&:name).keep_if do |current|
+        current.start_with?(self.class.plugin_prefix)
+      end
+    end
+
     # Check if a plugin is added as dependency to either the
     # Gemfile or the Pluginfile
     def plugin_is_added_as_dependency?(plugin_name)
@@ -155,11 +164,11 @@ module Fastlane
     #####################################################
 
     def self.fetch_gem_info_from_rubygems(gem_name)
-      require 'open-uri'
       require 'json'
+      require 'open-uri'
       url = "https://rubygems.org/api/v1/gems/#{gem_name}.json"
       begin
-        JSON.parse(open(url).read)
+        JSON.parse(URI.parse(url).open.read)
       rescue
         nil
       end
@@ -176,8 +185,9 @@ module Fastlane
       puts("Installing plugin dependencies...")
       ensure_plugins_attached!
       with_clean_bundler_env do
-        cmd = "bundle install"
+        cmd = +"bundle install"
         cmd << " --quiet" unless FastlaneCore::Globals.verbose?
+        cmd << " && bundle exec fastlane generate_swift" if FastlaneCore::FastlaneFolder.swift?
         cmd << " && echo 'Successfully installed plugins'"
         UI.command(cmd) if FastlaneCore::Globals.verbose?
         exec(cmd)
@@ -194,9 +204,10 @@ module Fastlane
         UI.user_error!("No plugins are installed")
       end
       with_clean_bundler_env do
-        cmd = "bundle update"
+        cmd = +"bundle update"
         cmd << " #{plugins.join(' ')}"
         cmd << " --quiet" unless FastlaneCore::Globals.verbose?
+        cmd << " && bundle exec fastlane generate_swift" if FastlaneCore::FastlaneFolder.swift?
         cmd << " && echo 'Successfully updated plugins'"
         UI.command(cmd) if FastlaneCore::Globals.verbose?
         exec(cmd)
@@ -213,7 +224,7 @@ module Fastlane
       # Bundler.with_clean_env solves this problem by resetting Bundler state before the
       # exec'd call gets merged into this process.
 
-      Bundler.with_clean_env do
+      Bundler.with_original_env do
         yield if block_given?
       end
     end
@@ -276,11 +287,12 @@ module Fastlane
     #   fastlane-plugin-[plugin_name]
     # This will make sure to load the action
     # and all its helpers
-    def load_plugins
+    # @param plugins [Array] the plugins to load, the available plugins by default
+    def load_plugins(print_table: true, plugins: nil)
       UI.verbose("Checking if there are any plugins that should be loaded...")
 
       loaded_plugins = false
-      available_plugins.each do |gem_name|
+      (plugins || available_plugins).each do |gem_name|
         UI.verbose("Loading '#{gem_name}' plugin")
         begin
           # BEFORE requiring the gem, we get a list of loaded actions
@@ -304,25 +316,34 @@ module Fastlane
         end
       end
 
-      if !loaded_plugins && self.pluginfile_content.to_s.include?(PluginManager.plugin_prefix)
+      if plugins.nil? && !loaded_plugins && self.pluginfile_content.to_s.include?(PluginManager.plugin_prefix)
         UI.error("It seems like you wanted to load some plugins, however they couldn't be loaded")
         UI.error("Please follow the troubleshooting guide: #{TROUBLESHOOTING_URL}")
       end
 
-      skip_print_plugin_info = self.plugin_references.empty? || CLIToolsDistributor.running_version_command? || FastlaneCore::Env.truthy?("FASTLANE_ENV_PRINTER")
+      skip_print_plugin_info = self.plugin_references.empty? || CLIToolsDistributor.running_version_command? || !print_table
 
       # We want to avoid printing output other than the version number if we are running `fastlane -v`
       print_plugin_information(self.plugin_references) unless skip_print_plugin_info
     end
 
+    # Loads the plugins the given gem depends on that are not loaded yet
+    def load_plugins_required_by(gem_name, print_table: true)
+      plugins = plugins_required_by(gem_name) - self.plugin_references.keys
+      load_plugins(print_table: print_table, plugins: plugins) unless plugins.empty?
+    end
+
     # Prints a table all the plugins that were loaded
     def print_plugin_information(references)
+      no_action_found = false
+
       rows = references.collect do |current|
         if current[1][:actions].empty?
           # Something is wrong with this plugin, no available actions
+          no_action_found = true
           [current[0].red, current[1][:version_number], "No actions found".red]
         else
-          [current[0], current[1][:version_number], current[1][:actions].join("\n")]
+          [current[0], current[1][:version_number], current[1][:actions].join(", ")]
         end
       end
 
@@ -333,6 +354,13 @@ module Fastlane
         headings: ["Plugin", "Version", "Action"]
       }))
       puts("")
+
+      if no_action_found
+        puts("[!] No actions were found while loading one or more plugins".red)
+        puts("    Please use `bundle exec fastlane` with plugins".red)
+        puts("    More info - https://docs.fastlane.tools/plugins/using-plugins/#run-with-plugins".red)
+        puts("")
+      end
     end
 
     #####################################################
@@ -361,9 +389,9 @@ module Fastlane
       # (a plugin may contain any number of actions)
       version_number = Fastlane::ActionCollector.determine_version(gem_name)
       references = Fastlane.const_get(module_name).all_classes.collect do |path|
-        next unless File.dirname(path).end_with?("/actions") # we only want to match actions
+        next unless File.dirname(path).include?("/actions") # we only want to match actions
 
-        File.basename(path).gsub("_action", "").gsub(".rb", "").to_sym # the _action is optional
+        File.basename(path).gsub(".rb", "").gsub(/_action$/, '').to_sym # the _action is optional
       end
       references.compact!
 
@@ -382,6 +410,22 @@ module Fastlane
         version_number: version_number,
         actions: references
       }
+    end
+
+    private
+
+    # recursively collect runtime dependencies
+    def collect_bundler_runtime_dependencies(collection, source)
+      # Compare by name: one gem can be required with different version constraints
+      known = collection.map(&:name)
+      runtime_deps = source.dependencies.select { |d| d.type == :runtime && !known.include?(d.name) }.uniq(&:name)
+      collection.concat(runtime_deps)
+      runtime_deps.each do |d|
+        collect_bundler_runtime_dependencies(collection, d.to_spec)
+      rescue Gem::MissingSpecError
+        # ignoring unresolvable dependencies
+      end
+      collection
     end
   end
 end

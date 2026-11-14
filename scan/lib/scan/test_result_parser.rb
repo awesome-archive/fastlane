@@ -3,6 +3,14 @@ require_relative 'module'
 module Scan
   class TestResultParser
     def parse_result(output)
+      UI.deprecated("Scan::TestResultParser is deprecated and will be removed in a future version of fastlane; scan no longer uses it. Read the test counts from the result bundle with Trainer::TestParser, or from the <testsuites> attributes of the JUnit report.")
+      unless output
+        return {
+            tests: 0,
+            failures: 0
+        }
+      end
+
       # e.g. ...<testsuites tests='2' failures='1'>...
       matched = output.scan(/<testsuites\b(?=[^<>]*\s+tests='(\d+)')(?=[^<>]*\s+failures='(\d+)')[^<>]+>/)
 
@@ -10,13 +18,13 @@ module Scan
         tests = matched[0][0].to_i
         failures = matched[0][1].to_i
 
-        return {
+        {
           tests: tests,
           failures: failures
         }
       else
         UI.error("Couldn't parse the number of tests from the output")
-        return {
+        {
           tests: 0,
           failures: 0
         }

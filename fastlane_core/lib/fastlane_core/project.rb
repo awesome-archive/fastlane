@@ -1,5 +1,7 @@
 require_relative 'helper'
 require 'xcodeproj'
+require_relative './configuration/configuration'
+require 'fastlane_core/command_executor'
 
 module FastlaneCore
   # Represents an Xcode project
@@ -66,26 +68,30 @@ module FastlaneCore
     # Is this project a workspace?
     attr_accessor :is_workspace
 
-    # The config object containing the scheme, configuration, etc.
-    attr_accessor :options
-
-    # Should the output of xcodebuild commands be silenced?
-    attr_accessor :xcodebuild_list_silent
-
-    # Should we redirect stderr to /dev/null for xcodebuild commands?
-    # Gets rid of annoying plugin info warnings.
-    attr_accessor :xcodebuild_suppress_stderr
-
-    def initialize(options, xcodebuild_list_silent: false, xcodebuild_suppress_stderr: false)
-      self.options = options
-      self.path = File.expand_path(options[:workspace] || options[:project])
-      self.is_workspace = (options[:workspace].to_s.length > 0)
-      self.xcodebuild_list_silent = xcodebuild_list_silent
-      self.xcodebuild_suppress_stderr = xcodebuild_suppress_stderr
+    # @param options [FastlaneCore::Configuration|Hash] a set of configuration to run xcodebuild to work out build settings
+    # @param xcodebuild_list_silent [Boolean] a flag to silent xcodebuild command's output
+    # @param xcodebuild_suppress_stderr [Boolean] a flag to suppress output to stderr from xcodebuild
+    def initialize(options)
+      @options = options
+      @path = File.expand_path(self.options[:workspace] || self.options[:project])
+      @is_workspace = (self.options[:workspace].to_s.length > 0)
 
       if !path || !File.directory?(path)
         UI.user_error!("Could not find project at path '#{path}'")
       end
+    end
+
+    # @return [Hash] a hash object containing project, workspace, scheme, any configuration related to xcodebuild, or etc...
+    def options
+      # To keep compatibility with actions using this class from outside of `fastlane` gem; i.e. `xcov`,
+      # converts `options` to a plain Hash. Otherwise, it might crash when a new option's key is added
+      # due to `FastlaneCore::Configuration` to validate valid keys defined.
+      @options.kind_of?(FastlaneCore::Configuration) ? @options.values : @options
+    end
+
+    def options=(new_value)
+      UI.deprecated('Update `options` is not worth doing since it can change behavior of this object entirely. Consider re-creating FastlaneCore::Project.')
+      @options = new_value
     end
 
     def workspace?
@@ -117,9 +123,13 @@ module FastlaneCore
     # Get all available schemes in an array
     def schemes
       @schemes ||= if workspace?
-                     workspace.schemes.reject do |k, v|
-                       v.include?("Pods/Pods.xcodeproj")
-                     end.keys
+                     if FastlaneCore::Env.truthy?("FASTLANE_INCLUDE_PODS_PROJECT_SCHEMES")
+                       workspace.schemes.keys
+                     else
+                       workspace.schemes.reject do |k, v|
+                         v.include?("Pods/Pods.xcodeproj")
+                       end.keys
+                     end
                    else
                      Xcodeproj::Project.schemes(path)
                    end
@@ -182,7 +192,7 @@ module FastlaneCore
                               .reject { |p| p.include?("Pods/Pods.xcodeproj") }
                               .map do |p|
                                 # To maintain backwards compatibility, we
-                                # silently ignore non-existent projects from
+                                # silently ignore nonexistent projects from
                                 # workspaces.
                                 begin
                                   Xcodeproj::Project.open(p).build_configurations
@@ -273,6 +283,10 @@ module FastlaneCore
       (framework? && build_settings(key: "PLATFORM_NAME") == "macosx")
     end
 
+    def supports_mac_catalyst?
+      build_settings(key: "SUPPORTS_MACCATALYST") == "YES" || build_settings(key: "SUPPORTS_UIKITFORMAC") == "YES"
+    end
+
     def command_line_tool?
       (build_settings(key: "PRODUCT_TYPE") == "com.apple.product-type.tool")
     end
@@ -289,6 +303,18 @@ module FastlaneCore
       supported_platforms.include?(:iOS)
     end
 
+    def watchos?
+      supported_platforms.include?(:watchOS)
+    end
+
+    def visionos?
+      supported_platforms.include?(:visionOS)
+    end
+
+    def multiplatform?
+      supported_platforms.count > 1
+    end
+
     def supported_platforms
       supported_platforms = build_settings(key: "SUPPORTED_PLATFORMS")
       if supported_platforms.nil?
@@ -301,6 +327,7 @@ module FastlaneCore
         when "iphonesimulator", "iphoneos" then :iOS
         when "watchsimulator", "watchos" then :watchOS
         when "appletvsimulator", "appletvos" then :tvOS
+        when "xros", "xrsimulator" then :visionOS
         end
       end.uniq.compact
     end
@@ -311,7 +338,27 @@ module FastlaneCore
       proj << "-scheme #{options[:scheme].shellescape}" if options[:scheme]
       proj << "-project #{options[:project].shellescape}" if options[:project]
       proj << "-configuration #{options[:configuration].shellescape}" if options[:configuration]
+      proj << "-derivedDataPath #{options[:derived_data_path].shellescape}" if options[:derived_data_path]
       proj << "-xcconfig #{options[:xcconfig].shellescape}" if options[:xcconfig]
+      proj << "-scmProvider system" if options[:use_system_scm]
+      proj << "-packageAuthorizationProvider #{options[:package_authorization_provider].shellescape}" if options[:package_authorization_provider]
+
+      xcode_at_least_11 = FastlaneCore::Helper.xcode_at_least?('11.0')
+      if xcode_at_least_11 && options[:cloned_source_packages_path]
+        proj << "-clonedSourcePackagesDirPath #{options[:cloned_source_packages_path].shellescape}"
+      end
+
+      if xcode_at_least_11 && options[:package_cache_path]
+        proj << "-packageCachePath #{options[:package_cache_path].shellescape}"
+      end
+
+      if xcode_at_least_11 && options[:disable_package_automatic_updates]
+        proj << "-disableAutomaticPackageResolution"
+      end
+
+      if xcode_at_least_11 && options[:skip_package_repository_fetches]
+        proj << "-skipPackageUpdates"
+      end
 
       return proj
     end
@@ -327,12 +374,37 @@ module FastlaneCore
       # This xcodebuild bug is fixed in Xcode 8.3 so 'clean' it's not necessary anymore
       # See: https://github.com/fastlane/fastlane/pull/5626
       if FastlaneCore::Helper.xcode_at_least?('8.3')
-        command = "xcodebuild -showBuildSettings #{xcodebuild_parameters.join(' ')}"
+        command = "xcodebuild -showBuildSettings #{xcodebuild_parameters.join(' ')}#{xcodebuild_destination_parameter}"
       else
         command = "xcodebuild clean -showBuildSettings #{xcodebuild_parameters.join(' ')}"
       end
-      command += " 2> /dev/null" if xcodebuild_suppress_stderr
+      command = "#{command} 2>&1" # xcodebuild produces errors on stderr #21672
       command
+    end
+
+    def build_xcodebuild_resolvepackagedependencies_command
+      return nil if options[:skip_package_dependencies_resolution]
+      command = "xcodebuild -resolvePackageDependencies #{xcodebuild_parameters.join(' ')}#{xcodebuild_destination_parameter}"
+      command
+    end
+
+    def xcodebuild_destination_parameter
+      # Xcode13+ xcodebuild command 'without destination parameter' generates annoying warnings
+      # See: https://github.com/fastlane/fastlane/issues/19579
+      destination_parameter = ""
+      xcode_at_least_13 = FastlaneCore::Helper.xcode_at_least?("13")
+      if xcode_at_least_13 && options[:destination]
+        begin
+          destination = options[:destination]
+          destination = destination.first if destination.kind_of?(Array)
+          destination_parameter = " " + "-destination #{destination.shellescape}"
+        rescue => ex
+          # xcodebuild command can continue without destination parameter, so
+          # we really don't care about this exception if something goes wrong with shellescape
+          UI.important("Failed to set destination parameter for xcodebuild command: #{ex}")
+        end
+      end
+      destination_parameter
     end
 
     # Get the build settings for our project
@@ -340,11 +412,35 @@ module FastlaneCore
     # @param [String] The key of which we want the value for (e.g. "PRODUCT_NAME")
     def build_settings(key: nil, optional: true)
       unless @build_settings
+        if (disallowed_by = xcodebuild_settings_lookup_disallowed_by)
+          message = "Could not read the '#{key}' build setting: fetching build settings by running" \
+            " `xcodebuild -showBuildSettings` is disallowed by #{disallowed_by}."
+          trigger = caller.find { |frame| !frame.start_with?(__FILE__) }
+          message += "\nThe build setting lookup was triggered by: #{trigger}" if trigger
+          message += "\nTo fix this, manually specify the option whose automatic detection required the '#{key}' build setting," \
+            " or disable #{disallowed_by} to allow fastlane to fetch it automatically."
+          UI.user_error!(message)
+        end
+
         if is_workspace
           if schemes.count == 0
             UI.user_error!("Could not find any schemes for Xcode workspace at path '#{self.path}'. Please make sure that the schemes you want to use are marked as `Shared` from Xcode.")
           end
           options[:scheme] ||= schemes.first
+        end
+
+        # SwiftPM support
+        if FastlaneCore::Helper.xcode_at_least?('11.0')
+          if (command = build_xcodebuild_resolvepackagedependencies_command)
+            UI.important("Resolving Swift Package Manager dependencies...")
+            FastlaneCore::CommandExecutor.execute(
+              command: command,
+              print_all: true,
+              print_command: true
+            )
+          else
+            UI.important("Skipped Swift Package Manager dependencies resolution.")
+          end
         end
 
         command = build_xcodebuild_showbuildsettings_command
@@ -353,7 +449,7 @@ module FastlaneCore
         begin
           timeout = FastlaneCore::Project.xcode_build_settings_timeout
           retries = FastlaneCore::Project.xcode_build_settings_retries
-          @build_settings = FastlaneCore::Project.run_command(command, timeout: timeout, retries: retries, print: !self.xcodebuild_list_silent)
+          @build_settings = FastlaneCore::Project.run_command(command, timeout: timeout, retries: retries, print: true)
           if @build_settings.empty?
             UI.error("Could not read build settings. Make sure that the scheme \"#{options[:scheme]}\" is configured for running by going to Product → Scheme → Edit Scheme…, selecting the \"Build\" section, checking the \"Run\" checkbox and closing the scheme window.")
           end
@@ -476,6 +572,15 @@ module FastlaneCore
     # matching project name?
     def automated_scheme_selection?
       FastlaneCore::Env.truthy?("AUTOMATED_SCHEME_SELECTION")
+    end
+
+    # Returns a description of what disallowed fetching build settings via the
+    # (potentially slow on large projects) `xcodebuild -showBuildSettings` command,
+    # or nil if the lookup is allowed
+    def xcodebuild_settings_lookup_disallowed_by
+      return "the FASTLANE_DISALLOW_XCODEBUILD_SETTINGS_LOOKUP environment variable" if FastlaneCore::Env.truthy?("FASTLANE_DISALLOW_XCODEBUILD_SETTINGS_LOOKUP")
+      return "the `disallow_xcodebuild_settings_lookup` option" if options[:disallow_xcodebuild_settings_lookup]
+      nil
     end
   end
 end

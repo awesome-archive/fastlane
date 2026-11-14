@@ -56,13 +56,13 @@ module Fastlane
     def class_ref_for_action(named: nil)
       class_ref = Actions.action_class_ref(named)
       unless class_ref
-        if Fastlane::Actions.formerly_bundled_actions.include?(action)
+        if Fastlane::Actions.formerly_bundled_actions.include?(named)
           # This was a formerly bundled action which is now a plugin.
           UI.verbose(caller.join("\n"))
-          UI.user_error!("The action '#{action}' is no longer bundled with fastlane. You can install it using `fastlane add_plugin #{action}`")
+          UI.user_error!("The action '#{named}' is no longer bundled with fastlane. You can install it using `fastlane add_plugin #{named}`")
         else
-          Fastlane::ActionsList.print_suggestions(action)
-          UI.user_error!("Action '#{action}' not available, run `fastlane actions` to get a full list")
+          Fastlane::ActionsList.print_suggestions(named)
+          UI.user_error!("Action '#{named}' not available, run `fastlane actions` to get a full list")
         end
       end
 
@@ -83,7 +83,7 @@ module Fastlane
 
       case command.method_name
       when "sh"
-        error_callback = proc { |string_value| closure_argument_value = string_value }
+        error_callback = proc { |string_value| closure_argument_value = string_value } if parameter_map[:error_callback]
         command_param = parameter_map[:command]
         log_param = parameter_map[:log]
         action_return = Fastlane::FastFile.sh(command_param, log: log_param, error_callback: error_callback)

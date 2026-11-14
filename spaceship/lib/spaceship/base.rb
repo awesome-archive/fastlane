@@ -1,3 +1,5 @@
+require_relative 'globals'
+
 module Spaceship
   ##
   # Spaceship::Base is the superclass for models in Apple Developer Portal.
@@ -64,6 +66,9 @@ module Spaceship
         h = @hash.dup
         h.delete(:application)
         h.to_json(*a)
+      rescue JSON::GeneratorError => e
+        puts("Failed to jsonify #{h} (#{a})") if Spaceship::Globals.verbose?
+        raise e
       end
 
       def to_h
@@ -84,12 +89,12 @@ module Spaceship
       ##
       # Sets client and returns self for chaining.
       # @return (Spaceship::Base)
-      # rubocop:disable Style/AccessorMethodName
+      # rubocop:disable Naming/AccessorMethodName
       def set_client(client)
         self.client = client
         self
       end
-      # rubocop:enable Style/AccessorMethodName
+      # rubocop:enable Naming/AccessorMethodName
 
       ##
       # Binds attributes getters and setters to underlying data returned from the API.
@@ -176,7 +181,7 @@ module Spaceship
       #   ProvisioningProfile.some_other_method
       #   #=> NoMethodError: undefined method `some_other_method' for ProvisioningProfile
       def method_missing(method_sym, *args, &block)
-        module_name = method_sym.to_s
+        module_name = method_sym.to_s.dup
         module_name.sub!(/^[a-z\d]/) { $&.upcase }
         module_name.gsub!(%r{(?:_|(/))([a-z\d])}) { $2.upcase }
         if const_defined?(module_name)
@@ -219,7 +224,9 @@ module Spaceship
     # The initialize method accepts a parsed response from Apple and sets all
     # attributes that are defined by `attr_mapping`
     #
-    # Do not override `initialize` in your own models.
+    # Do not override `initialize` in your own models, use `setup` instead. An
+    # override that has to take a value Apple's response does not carry must call
+    # `super`, or `attr_mapping`, `raw_data`, `client` and `setup` are all skipped.
     def initialize(attrs = {}, existing_client = nil)
       attrs.each do |key, val|
         self.send("#{key}=", val) if respond_to?("#{key}=")
@@ -290,7 +297,7 @@ module Spaceship
     def inspect_value
       self.attributes.map do |k|
         v = self.send(k).inspect
-        v.gsub!("\n", "\n\t") # to align nested elements
+        v = v.gsub("\n", "\n\t") # to align nested elements
 
         "\t#{k}=#{v}"
       end.join(", \n")

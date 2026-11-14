@@ -15,7 +15,7 @@ module Fastlane
 
     # This will take care of executing **one** lane. That's when the user triggers a lane from the CLI for example
     # This method is **not** executed when switching a lane
-    # @param lane_name The name of the lane to execute
+    # @param lane The name of the lane to execute
     # @param platform The name of the platform to execute
     # @param parameters [Hash] The parameters passed from the command line to the lane
     def execute(lane, platform = nil, parameters = nil)
@@ -40,13 +40,13 @@ module Fastlane
       return_val = nil
 
       path_to_use = FastlaneCore::FastlaneFolder.path || Dir.pwd
-      parameters ||= {}
+      parameters ||= {} # by default no parameters
       begin
         Dir.chdir(path_to_use) do # the file is located in the fastlane folder
           execute_flow_block(before_all_blocks, current_platform, current_lane, parameters)
           execute_flow_block(before_each_blocks, current_platform, current_lane, parameters)
 
-          return_val = lane_obj.call(parameters) # by default no parameters
+          return_val = lane_obj.call(parameters)
 
           # after blocks are only called if no exception was raised before
           # Call the platform specific after block and then the general one
@@ -124,7 +124,7 @@ module Fastlane
 
     # This is being called from `method_missing` from the Fastfile
     # It's also used when an action is called from another action
-    # @param from_action Indicates if this action is being trigged by another action.
+    # @param from_action Indicates if this action is being triggered by another action.
     #                    If so, it won't show up in summary.
     def trigger_action_by_name(method_sym, custom_dir, from_action, *arguments)
       # First, check if there is a predefined method in the actions folder
@@ -135,6 +135,7 @@ module Fastlane
         if class_ref.respond_to?(:alias_used)
           orig_action = method_sym.to_s
           arguments = [{}] if arguments.empty?
+          arguments[0] = arguments.first.dup if arguments.first.kind_of?(String) # alias_used may change it, and it can be a literal from the Fastfile
           class_ref.alias_used(orig_action, arguments.first)
         end
       end
@@ -151,13 +152,10 @@ module Fastlane
         # built-in actions
       end
 
+      # Both lookups above only return classes that respond to `run`
       if class_ref
-        if class_ref.respond_to?(:run)
-          # Action is available, now execute it
-          return self.execute_action(method_sym, class_ref, arguments, custom_dir: custom_dir, from_action: from_action)
-        else
-          UI.user_error!("Action '#{method_sym}' of class '#{class_name}' was found, but has no `run` method.")
-        end
+        # Action is available, now execute it
+        return self.execute_action(method_sym, class_ref, arguments, custom_dir: custom_dir, from_action: from_action)
       end
 
       # No lane, no action, let's at least show the correct error message
@@ -216,7 +214,9 @@ module Fastlane
     end
 
     def execute_action(method_sym, class_ref, arguments, custom_dir: nil, from_action: false)
-      if custom_dir.nil?
+      if from_action == true
+        custom_dir = "." # We preserve the directory from where the previous action was called from
+      elsif custom_dir.nil?
         custom_dir ||= "." if Helper.test?
         custom_dir ||= ".."
       end
@@ -225,40 +225,45 @@ module Fastlane
 
       begin
         Dir.chdir(custom_dir) do # go up from the fastlane folder, to the project folder
-          # If another action is calling this action, we shouldn't show it in the summary
+          # Removing step_name before its parsed into configurations
+          args = arguments.kind_of?(Array) && arguments.first.kind_of?(Hash) ? arguments.first : {}
+          step_name = args.delete(:step_name)
 
-          unless from_action
-            args = arguments.kind_of?(Array) && arguments.first.kind_of?(Hash) ? arguments.first : {}
-            action_name = args[:step_name] || class_ref.step_text
-            args.delete(:step_name)
+          # arguments is an array by default, containing an hash with the actual parameters
+          # Since we usually just need the passed hash, we'll just use the first object if there is only one
+          if arguments.count == 0
+            configurations = ConfigurationHelper.parse(class_ref, {}) # no parameters => empty hash
+          elsif arguments.count == 1 && arguments.first.kind_of?(Hash)
+            configurations = ConfigurationHelper.parse(class_ref, arguments.first) # Correct configuration passed
+          elsif !class_ref.available_options
+            # This action does not use the new action format
+            # Just passing the arguments to this method
+            configurations = arguments
+          else
+            UI.user_error!("You have to call the integration like `#{method_sym}(key: \"value\")`. Run `fastlane action #{method_sym}` for all available keys. Please check out the current documentation on GitHub.")
           end
-          Actions.execute_action(action_name) do
-            # arguments is an array by default, containing an hash with the actual parameters
-            # Since we usually just need the passed hash, we'll just use the first object if there is only one
-            if arguments.count == 0
-              arguments = ConfigurationHelper.parse(class_ref, {}) # no parameters => empty hash
-            elsif arguments.count == 1 && arguments.first.kind_of?(Hash)
-              arguments = ConfigurationHelper.parse(class_ref, arguments.first) # Correct configuration passed
-            elsif !class_ref.available_options
-              # This action does not use the new action format
-              # Just passing the arguments to this method
-            else
-              UI.user_error!("You have to call the integration like `#{method_sym}(key: \"value\")`. Run `fastlane action #{method_sym}` for all available keys. Please check out the current documentation on GitHub.")
-            end
 
+          # If another action is calling this action, we shouldn't show it in the summary
+          # A nil value for action_name will hide it from the summary
+          unless from_action
+            action_name = step_name
+            action_name ||= class_ref.method(:step_text).arity == 1 ? class_ref.step_text(configurations) : class_ref.step_text
+          end
+
+          Actions.execute_action(action_name) do
             if Fastlane::Actions.is_deprecated?(class_ref)
               puts("==========================================".deprecated)
               puts("This action (#{method_sym}) is deprecated".deprecated)
               puts(class_ref.deprecated_notes.to_s.remove_markdown.deprecated) if class_ref.deprecated_notes
               puts("==========================================\n".deprecated)
             end
-            class_ref.runner = self # needed to call another action form an action
-            return class_ref.run(arguments)
+            class_ref.runner = self # needed to call another action from an action
+            return class_ref.run(configurations)
           end
         end
       rescue Interrupt => e
         raise e # reraise the interruption to avoid logging this as a crash
-      rescue FastlaneCore::Interface::FastlaneCommonException => e # these are exceptions that we dont count as crashes
+      rescue FastlaneCore::Interface::FastlaneCommonException => e # these are exceptions that we don't count as crashes
         raise e
       rescue FastlaneCore::Interface::FastlaneError => e # user_error!
         action_completed(method_sym.to_s, status: FastlaneCore::ActionCompletionStatus::USER_ERROR, exception: e)

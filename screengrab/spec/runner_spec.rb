@@ -1,5 +1,5 @@
 describe Screengrab::Runner do
-  let(:config) { {} }
+  let(:config) { { tests_package_name: "com.package.app", test_instrumentation_runner: "Runner" } }
   let(:ui) { Screengrab::UI }
   let(:mock_android_environment) { double(Screengrab.android_environment) }
   let(:mock_executor) { class_double('FastlaneCore::CommandExecutor') }
@@ -32,19 +32,21 @@ describe Screengrab::Runner do
       before do
         config[:launch_arguments] = ["username hjanuschka", "build_type x500"]
         config[:locales] = %w(en-US)
-        config[:ending_locale] = 'en-US'
+        config[:use_timestamp_suffix] = true
       end
       it 'sets custom launch_arguments' do
+        # Don't actually try to pull screenshot from device
+        allow(@runner).to receive(:pull_screenshots_from_device)
+
         expect(mock_executor).to receive(:execute)
-          .with(hash_including(command: "adb -s device_serial shell am instrument --no-window-animation -w \\\n-e testLocale en_US \\\n-e endingLocale en_US \\\n-e username hjanuschka -e build_type x500 \\\n/"))
-        @runner.run_tests_for_locale('en-US', device_serial, test_classes_to_use, test_packages_to_use, config[:launch_arguments])
+          .with(hash_including(command: "adb -s device_serial shell am instrument --no-window-animation -w \\\n-e testLocale en-US \\\n-e appendTimestamp true \\\n-e username hjanuschka -e build_type x500 \\\ncom.package.app/Runner"))
+        @runner.run_tests_for_locale('device', 'en-US', device_serial, test_classes_to_use, test_packages_to_use, config[:launch_arguments], 27)
       end
     end
 
     context 'when a locale is specified' do
       before do
         config[:locales] = %w(en-US)
-        config[:ending_locale] = 'en-US'
       end
 
       context 'when tests produce a failure' do
@@ -58,9 +60,12 @@ describe Screengrab::Runner do
           end
 
           it 'prints an error and exits the program' do
+            # Don't actually try to pull screenshot from device
+            allow(@runner).to receive(:pull_screenshots_from_device)
+
             expect(ui).to receive(:test_failure!).with("Tests failed for locale en-US on device #{device_serial}").and_call_original
 
-            expect { @runner.run_tests_for_locale('en-US', device_serial, test_classes_to_use, test_packages_to_use, nil) }.to raise_fastlane_test_failure
+            expect { @runner.run_tests_for_locale('device', 'en-US', device_serial, test_classes_to_use, test_packages_to_use, nil, 27) }.to raise_fastlane_test_failure
           end
         end
 
@@ -70,115 +75,70 @@ describe Screengrab::Runner do
           end
 
           it 'prints an error and does not exit the program' do
+            # Don't actually try to pull screenshot from device
+            allow(@runner).to receive(:pull_screenshots_from_device)
+
             expect(ui).to receive(:error).with("Tests failed").and_call_original
 
-            @runner.run_tests_for_locale('en-US', device_serial, test_classes_to_use, test_packages_to_use, nil)
+            @runner.run_tests_for_locale('device', 'en-US', device_serial, test_classes_to_use, test_packages_to_use, nil, 27)
           end
         end
       end
     end
-  end
 
-  describe :validate_apk do
-    context 'no aapt' do
-      it 'prints an error unless aapt can be found' do
-        expect(mock_android_environment).to receive(:aapt_path).and_return(nil)
-        expect(mock_executor).not_to(receive(:execute))
-        expect(ui).to receive(:important).with(/.*aapt.*could not be found/)
+    context 'when using use_timestamp_suffix' do
+      context 'when set to false' do
+        before do
+          @runner = Screengrab::Runner.new(
+            mock_executor,
+            FastlaneCore::Configuration.create(Screengrab::Options.available_options, { use_timestamp_suffix: false, tests_package_name: "com.package.app", test_instrumentation_runner: "Runner" }),
+            mock_android_environment
+          )
+        end
+        it 'sets appendTimestamp as false' do
+          # Don't actually try to pull screenshot from device
+          allow(@runner).to receive(:pull_screenshots_from_device)
 
-        @runner.validate_apk('fake_apk_path')
+          expect(mock_executor).to receive(:execute)
+            .with(hash_including(command: "adb -s device_serial shell am instrument --no-window-animation -w \\\n-e testLocale en-US \\\n-e appendTimestamp false \\\ncom.package.app/Runner"))
+          @runner.run_tests_for_locale('device', 'en-US', device_serial, test_classes_to_use, test_packages_to_use, nil, 27)
+        end
+      end
+
+      context 'use_timestamp_suffix is not specified' do
+        before do
+          @runner = Screengrab::Runner.new(
+            mock_executor,
+            FastlaneCore::Configuration.create(Screengrab::Options.available_options, { tests_package_name: "com.package.app", test_instrumentation_runner: "Runner" }),
+            mock_android_environment
+          )
+        end
+        it 'should set appendTimestamp by default' do
+          # Don't actually try to pull screenshot from device
+          allow(@runner).to receive(:pull_screenshots_from_device)
+
+          expect(mock_executor).to receive(:execute)
+            .with(hash_including(command: "adb -s device_serial shell am instrument --no-window-animation -w \\\n-e testLocale en-US \\\n-e appendTimestamp true \\\ncom.package.app/Runner"))
+          @runner.run_tests_for_locale('device', 'en-US', device_serial, test_classes_to_use, test_packages_to_use, nil, 27)
+        end
       end
     end
 
-    context 'no permissions' do
-      it 'prints if permissions are missing' do
-        allow(mock_android_environment).to receive(:aapt_path).and_return('fake_aapt_path')
-        mock_adb_response_for_command('fake_aapt_path dump permissions fake_apk_path', '')
-
-        expect(ui).to receive(:user_error!).with(/permission.* could not be found/).and_call_original
-
-        expect { @runner.validate_apk('fake_apk_path') }.to raise_fastlane_error
+    context 'when sdk_version is >= 28' do
+      before do
+        @runner = Screengrab::Runner.new(
+          mock_executor,
+          FastlaneCore::Configuration.create(Screengrab::Options.available_options, { tests_package_name: "com.package.app", test_instrumentation_runner: "Runner" }),
+          mock_android_environment
+        )
       end
-    end
-  end
+      it 'disables hidden api checks' do
+        # Don't actually try to pull screenshot from device
+        allow(@runner).to receive(:pull_screenshots_from_device)
 
-  describe :select_device do
-    let(:adb_list_devices_command) { 'adb devices -l' }
-
-    before do
-      expect(mock_android_environment).to receive(:adb_path).and_return("adb")
-    end
-
-    context 'no devices' do
-      it 'does not find any active devices' do
-        adb_response = strip_heredoc(<<-ADB_OUTPUT)
-        List of devices attached
-
-        ADB_OUTPUT
-        mock_adb_response_for_command(adb_list_devices_command, adb_response)
-
-        expect(ui).to receive(:user_error!).with(/no connected.* devices/).and_call_original
-
-        expect { @runner.select_device }.to raise_fastlane_error
-      end
-    end
-
-    context 'one device with spurious ADB output mixed in' do
-      it 'finds an active device' do
-        adb_response = strip_heredoc(<<-ADB_OUTPUT)
-          List of devices attached
-          adb server version (39) doesn't match this client (36); killing...
-          * daemon started successfully
-          T065002LTT             device usb:437387264X product:ghost_retail model:XT1053 device:ghost
-
-
-        ADB_OUTPUT
-        mock_adb_response_for_command(adb_list_devices_command, adb_response)
-
-        expect(@runner.select_device).to eq('T065002LTT')
-      end
-    end
-
-    context 'one device' do
-      it 'finds an active device' do
-        adb_response = strip_heredoc(<<-ADB_OUTPUT)
-          List of devices attached
-          T065002LTT             device usb:437387264X product:ghost_retail model:XT1053 device:ghost
-
-
-        ADB_OUTPUT
-        mock_adb_response_for_command(adb_list_devices_command, adb_response)
-
-        expect(@runner.select_device).to eq('T065002LTT')
-      end
-    end
-
-    context 'multiple devices' do
-      it 'finds an active device' do
-        adb_response = strip_heredoc(<<-ADB_OUTPUT)
-          List of devices attached
-          emulator-5554          device product:sdk_phone_x86_64 model:Android_SDK_built_for_x86_64 device:generic_x86_64
-          T065002LTT             device usb:437387264X product:ghost_retail model:XT1053 device:ghost
-
-        ADB_OUTPUT
-
-        mock_adb_response_for_command(adb_list_devices_command, adb_response)
-        expect(@runner.select_device).to eq('emulator-5554')
-      end
-    end
-
-    context 'one device booting' do
-      it 'finds an active device' do
-        adb_response = strip_heredoc(<<-ADB_OUTPUT)
-          List of devices attached
-          emulator-5554 offline
-          T065002LTT  device
-
-        ADB_OUTPUT
-
-        mock_adb_response_for_command(adb_list_devices_command, adb_response)
-
-        expect(@runner.select_device).to eq('T065002LTT')
+        expect(mock_executor).to receive(:execute)
+          .with(hash_including(command: "adb -s device_serial shell am instrument --no-window-animation -w \\\n-e testLocale en-US \\\n--no-hidden-api-checks \\\n-e appendTimestamp true \\\ncom.package.app/Runner"))
+        @runner.run_tests_for_locale('device', 'en-US', device_serial, test_classes_to_use, test_packages_to_use, nil, 28)
       end
     end
   end
@@ -266,13 +226,109 @@ describe Screengrab::Runner do
       adb_response = strip_heredoc(<<-ADB_OUTPUT)
             adb: /home/me/rubystack-2.3.1-4/common/lib/libcrypto.so.1.0.0: no version information available (required by adb)
             List of devices attached
-            e1dbf228               device usb:1-1.2 product:a33gdd model:SM_A300H device:a33g
+            e1dbf228               device usb:1-1.2 product:a33gdd model:SM_A270H device:a33g
 
           ADB_OUTPUT
 
-      mock_adb_response_for_command("test", adb_response)
+      mock_adb_response_for_command("adb test", adb_response)
 
       expect(@runner.run_adb_command("test").lines.any? { |line| line.start_with?('adb: ') }).to eq(false)
+    end
+  end
+
+  describe :if_device_path_exists do
+    let(:device_serial) { 'device_serial' }
+    let(:app_package_name) { 'tools.fastlane.dev' }
+    let(:device_path) { '/data/data/tools.fastlane.dev/app_screengrab/en-US/images/screenshots' }
+
+    before do
+      expect(mock_android_environment).to receive(:adb_path).and_return("adb")
+    end
+
+    it 'checks missing paths without printing expected adb failures' do
+      expect(mock_executor).to receive(:execute)
+        .with(hash_including(
+                command: "adb -s #{device_serial} shell run-as #{app_package_name} ls #{device_path}",
+                print_all: false,
+                print_command: false,
+                suppress_error_output: true
+              ))
+        .and_return("ls: #{device_path}: No such file or directory")
+
+      expect do |probe|
+        @runner.if_device_path_exists(app_package_name, device_serial, device_path, true, &probe)
+      end.not_to yield_control
+    end
+  end
+
+  describe :pull_screenshots_from_device do
+    let(:locale) { 'en-US' }
+    let(:device_serial) { 'device_serial' }
+    let(:device_type_dir_name) { 'phoneScreenshots' }
+
+    before do
+      config[:app_package_name] = 'tools.fastlane.dev'
+      config[:clear_previous_screenshots] = false
+      config[:output_directory] = Dir.mktmpdir
+
+      existing_screenshots_dir = File.join(config[:output_directory], locale, 'images', device_type_dir_name)
+      FileUtils.mkdir_p(existing_screenshots_dir)
+      FileUtils.touch(File.join(existing_screenshots_dir, 'screenshot.png'))
+
+      allow(@runner).to receive(:determine_external_screenshots_path).and_return([])
+      allow(@runner).to receive(:determine_internal_screenshots_paths).and_return([])
+      allow(@runner).to receive(:move_pulled_screenshots).and_return(1)
+    end
+
+    after do
+      FileUtils.remove_entry(config[:output_directory])
+    end
+
+    it 'returns the number of screenshots copied even when existing files are overwritten' do
+      expect(@runner.pull_screenshots_from_device(locale, device_serial, device_type_dir_name)).to eq(1)
+    end
+  end
+
+  describe :move_pulled_screenshots do
+    let(:locale) { 'en-US' }
+    let(:device_type_dir_name) { 'phoneScreenshots' }
+
+    before do
+      config[:output_directory] = Dir.mktmpdir
+    end
+
+    after do
+      FileUtils.remove_entry(config[:output_directory])
+    end
+
+    it 'returns the number of screenshots copied' do
+      Dir.mktmpdir do |pull_dir|
+        screenshots_dir = File.join(pull_dir, 'screenshots')
+        FileUtils.mkdir_p(screenshots_dir)
+        FileUtils.touch(File.join(screenshots_dir, 'first.png'))
+        FileUtils.touch(File.join(screenshots_dir, 'second.png'))
+
+        copied_count = @runner.move_pulled_screenshots(locale, pull_dir, device_type_dir_name)
+        destination_dir = File.join(config[:output_directory], locale, 'images', device_type_dir_name)
+
+        expect(copied_count).to eq(2)
+        expect(Dir.glob(File.join(destination_dir, '*.png')).length).to eq(2)
+      end
+    end
+  end
+
+  describe :select_device do
+    it 'connects to host if specified' do
+      config[:adb_host] = "device_farm"
+
+      mock_helper = double('mock helper')
+      device = Fastlane::Helper::AdbDevice.new(serial: 'e1dbf228')
+
+      expect(mock_android_environment).to receive(:adb_path).and_return("adb")
+      expect(Fastlane::Helper::AdbHelper).to receive(:new).with(adb_path: 'adb', adb_host: 'device_farm').and_return(mock_helper)
+      expect(mock_helper).to receive(:load_all_devices).and_return([device])
+
+      expect(@runner.select_device).to eq('e1dbf228')
     end
   end
 end

@@ -1,5 +1,6 @@
 require 'fastlane_core/core_ext/cfpropertylist'
 require 'fastlane_core/project'
+require 'security'
 require_relative 'module'
 require_relative 'code_signing_mapping'
 
@@ -33,6 +34,7 @@ module Gym
       detect_selected_provisioning_profiles # we can only do that *after* we have the platform
       detect_configuration
       detect_toolchain
+      detect_third_party_installer
 
       config[:output_name] ||= Gym.project.app_name
 
@@ -40,8 +42,7 @@ module Gym
 
       # Make sure the output name is valid and remove a trailing `.ipa` extension
       # as it will be added by gym for free
-      config[:output_name].gsub!(".ipa", "")
-      config[:output_name].gsub!(File::SEPARATOR, "_")
+      config[:output_name] = config[:output_name].gsub(".ipa", "").gsub(File::SEPARATOR, "_")
 
       return config
     end
@@ -100,6 +101,38 @@ module Gym
       end
     end
 
+    # Detects name of a "3rd Party Mac Developer Installer" cert for the configured team id
+    def self.detect_third_party_installer
+      return if Gym.config[:installer_cert_name]
+
+      team_id = Gym.config[:export_team_id] || Gym.project.build_settings(key: "DEVELOPMENT_TEAM")
+      return if team_id.nil?
+
+      case Gym.config[:export_method]
+      when "app-store"
+        prefix = "3rd Party Mac Developer Installer: "
+      when "developer-id"
+        prefix = "Developer ID Installer: "
+      else
+        return
+      end
+
+      names = begin
+        Security::Certificate.find(name: prefix).map(&:name)
+      rescue Security::Error => e
+        UI.error("Could not search for installer certificates: #{e.message}")
+        []
+      end
+
+      # Filter by team_id, the part after the prefix
+      certs = names.uniq.select { |name| name.start_with?(prefix) && name.delete_prefix(prefix).include?(team_id) }
+
+      if certs.first
+        UI.verbose("Detected installer certificate to use: #{certs.first}")
+        Gym.config[:installer_cert_name] = certs.first
+      end
+    end
+
     def self.detect_scheme
       Gym.project.select_scheme
     end
@@ -111,14 +144,18 @@ module Gym
     # Is it an iOS device or a Mac?
     def self.detect_platform
       return if Gym.config[:destination]
-      platform = if Gym.project.mac?
-                   min_xcode8? ? "macOS" : "OS X"
-                 elsif Gym.project.tvos?
+
+      platform = if Gym.project.tvos?
                    "tvOS"
+                 elsif Gym.project.visionos?
+                   "visionOS"
+                 elsif Gym.building_for_ios?
+                   "iOS"
+                 elsif Gym.building_for_mac?
+                   min_xcode8? ? "macOS" : "OS X"
                  else
                    "iOS"
                  end
-
       Gym.config[:destination] = "generic/platform=#{platform}"
     end
 

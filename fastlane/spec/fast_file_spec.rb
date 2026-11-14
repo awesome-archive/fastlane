@@ -7,10 +7,168 @@ describe Fastlane do
         end.to raise_exception("Could not find Fastfile at path './fastlane/spec/fixtures/fastfiles/fastfileNotHere'")
       end
 
-      it "raises an error if unknow method is called" do
+      it "raises an error if unknown method is called" do
         expect do
           Fastlane::FastFile.new('./fastlane/spec/fixtures/fastfiles/FastfileInvalid')
         end.to raise_exception("Could not find action, lane or variable 'laneasdf'. Check out the documentation for more details: https://docs.fastlane.tools/actions")
+      end
+
+      it "prints a warning if an uninstalled library is required" do
+        expect_any_instance_of(Fastlane::FastFile).to receive(:parse)
+        expect(UI).to receive(:important).with("You have required a gem, if this is a third party gem, please use `fastlane_require 'some_remote_gem'` to ensure the gem is installed locally.")
+        Fastlane::FastFile.new('./fastlane/spec/fixtures/fastfiles/FastfileRequireUninstalledGem')
+      end
+
+      it "does not print a warning if required library is installed" do
+        expect_any_instance_of(Fastlane::FastFile).to receive(:parse)
+        expect(UI).not_to(receive(:important))
+        Fastlane::FastFile.new('./fastlane/spec/fixtures/fastfiles/FastfileRequireInstalledGem')
+      end
+    end
+
+    describe "#sh" do
+      before do
+        @ff = Fastlane::FastFile.new('./fastlane/spec/fixtures/fastfiles/FastfileGrouped')
+      end
+
+      context "with command argument" do
+        it "passes command as string with default log and error_callback" do
+          expect(Fastlane::Actions).to receive(:execute_action).with("git commit").and_call_original
+
+          expect(Fastlane::Actions).to receive(:sh_no_action)
+            .with("git commit", log: true, error_callback: nil, stdin: nil, separate_stderr: false, chdir: nil)
+          @ff.sh("git commit")
+        end
+
+        it "passes command as string and log with default error_callback" do
+          expect(Fastlane::Actions).to receive(:execute_action).with("git commit").and_call_original
+
+          expect(Fastlane::Actions).to receive(:sh_no_action)
+            .with("git commit", log: true, error_callback: nil, stdin: nil, separate_stderr: false, chdir: nil)
+          @ff.sh("git commit", log: true)
+        end
+
+        it "passes command as string, step_name, and log false with default error_callback" do
+          expect(Fastlane::Actions).to receive(:execute_action).with("some_name").and_call_original
+
+          expect(Fastlane::Actions).to receive(:sh_no_action)
+            .with("git commit", log: false, error_callback: nil, stdin: nil, separate_stderr: false, chdir: nil)
+          @ff.sh("git commit", step_name: "some_name", log: false)
+        end
+
+        it "passes command as string, step_name, and log true with default error_callback" do
+          expect(Fastlane::Actions).to receive(:execute_action).with("some_name").and_call_original
+
+          expect(Fastlane::Actions).to receive(:sh_no_action)
+            .with("git commit", log: true, error_callback: nil, stdin: nil, separate_stderr: false, chdir: nil)
+          @ff.sh("git commit", step_name: "some_name", log: true)
+        end
+
+        it "passes command as array with default log and error_callback" do
+          expect(Fastlane::Actions).to receive(:execute_action).with("git commit").and_call_original
+
+          expect(Fastlane::Actions).to receive(:sh_no_action)
+            .with("git", "commit", log: true, error_callback: nil, stdin: nil, separate_stderr: false, chdir: nil)
+          @ff.sh("git", "commit")
+        end
+
+        it "passes command as array with default log and error_callback" do
+          expect(Fastlane::Actions).to receive(:execute_action).with("git commit").and_call_original
+
+          expect(Fastlane::Actions).to receive(:sh_no_action)
+            .with("git", "commit", log: true, error_callback: nil, stdin: nil, separate_stderr: false, chdir: nil)
+          @ff.sh("git", "commit")
+        end
+
+        it "yields the status, result and command" do
+          expect(Fastlane::Actions).to receive(:execute_action).with("git commit").and_call_original
+
+          proc = proc {}
+          expect(Fastlane::Actions).to receive(:sh_no_action)
+            .with("git", "commit", log: true, error_callback: nil, stdin: nil, separate_stderr: false, chdir: nil) do |*args, &block|
+              expect(proc).to be(block)
+            end
+          @ff.sh("git", "commit", &proc)
+        end
+
+        it "passes separate_stderr" do
+          expect(Fastlane::Actions).to receive(:sh_no_action)
+            .with("git", "--version", log: true, error_callback: nil, stdin: nil, separate_stderr: true, chdir: nil)
+          @ff.sh("git", "--version", separate_stderr: true)
+        end
+
+        it "passes stdin" do
+          expect(Fastlane::Actions).to receive(:sh_no_action)
+            .with("cat", log: true, error_callback: nil, stdin: "EXAMPLE DATA", separate_stderr: false, chdir: nil)
+          @ff.sh("cat", stdin: "EXAMPLE DATA")
+        end
+
+        it "passes chdir" do
+          expect(Fastlane::Actions).to receive(:sh_no_action)
+            .with("pwd", log: true, error_callback: nil, stdin: nil, separate_stderr: false, chdir: "/tmp")
+          @ff.sh("pwd", chdir: "/tmp")
+        end
+      end
+
+      context "with named command keyword" do
+        it "passes command as string with default log and error_callback" do
+          expect(Fastlane::Actions).to receive(:execute_action).with("git commit").and_call_original
+
+          expect(Fastlane::Actions).to receive(:sh_no_action)
+            .with("git commit", log: true, error_callback: nil, stdin: nil, separate_stderr: false, chdir: nil)
+          @ff.sh(command: "git commit")
+        end
+
+        it "passes command as string and log with default error_callback" do
+          expect(Fastlane::Actions).to receive(:execute_action).with("shell command").and_call_original
+
+          expect(Fastlane::Actions).to receive(:sh_no_action)
+            .with("git commit", log: false, error_callback: nil, stdin: nil, separate_stderr: false, chdir: nil)
+          @ff.sh(command: "git commit", log: false)
+        end
+
+        it "passes command as array with default log and error_callback" do
+          expect(Fastlane::Actions).to receive(:execute_action).with("git commit").and_call_original
+
+          expect(Fastlane::Actions).to receive(:sh_no_action)
+            .with("git", "commit", log: true, error_callback: nil, stdin: nil, separate_stderr: false, chdir: nil)
+          @ff.sh(command: ["git", "commit"])
+        end
+
+        it "yields the status, result and command" do
+          expect(Fastlane::Actions).to receive(:execute_action).with("git commit").and_call_original
+
+          proc = proc {}
+          expect(Fastlane::Actions).to receive(:sh_no_action)
+            .with("git", "commit", log: true, error_callback: nil, stdin: nil, separate_stderr: false, chdir: nil) do |*args, &block|
+              expect(proc).to be(block)
+            end
+          @ff.sh(command: ["git", "commit"], &proc)
+        end
+
+        it "passes separate_stderr" do
+          expect(Fastlane::Actions).to receive(:sh_no_action)
+            .with("git --version", log: true, error_callback: nil, stdin: nil, separate_stderr: true, chdir: nil)
+          @ff.sh(command: "git --version", separate_stderr: true)
+        end
+
+        it "passes stdin" do
+          expect(Fastlane::Actions).to receive(:sh_no_action)
+            .with("cat", log: true, error_callback: nil, stdin: "EXAMPLE DATA", separate_stderr: false, chdir: nil)
+          @ff.sh(command: "cat", stdin: "EXAMPLE DATA")
+        end
+
+        it "passes chdir" do
+          expect(Fastlane::Actions).to receive(:sh_no_action)
+            .with("pwd", log: true, error_callback: nil, stdin: nil, separate_stderr: false, chdir: "/tmp")
+          @ff.sh(command: "pwd", chdir: "/tmp")
+        end
+
+        it "raises error if no :command keyboard" do
+          expect do
+            @ff.sh(log: true)
+          end.to raise_error(ArgumentError)
+        end
       end
     end
 
@@ -59,7 +217,7 @@ describe Fastlane do
         end
       end
 
-      it "raises an error if the name is on a black list" do
+      it "raises an error if the name is on a deny list" do
         expect(UI).to receive(:user_error!).with("Lane name 'run' is invalid")
         @ff.lane(:run) do
         end
@@ -74,7 +232,7 @@ describe Fastlane do
 
     describe "Grouped fastlane for different platforms" do
       before do
-        FileUtils.rm_rf('/tmp/fastlane/')
+        FileUtils.rm_rf(FASTLANE_SPEC_SCRATCH)
 
         @ff = Fastlane::FastFile.new('./fastlane/spec/fixtures/fastfiles/FastfileGrouped')
       end
@@ -82,11 +240,11 @@ describe Fastlane do
       it "calls a block for a given platform (mac - beta)" do
         @ff.runner.execute('beta', 'mac')
 
-        expect(File.exist?('/tmp/fastlane/mac_beta.txt')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/before_all_android.txt')).to eq(false)
-        expect(File.exist?('/tmp/fastlane/before_all.txt')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/before_each_beta.txt')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/after_each_beta.txt')).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/mac_beta.txt")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/before_all_android.txt")).to eq(false)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/before_all.txt")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/before_each_beta.txt")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/after_each_beta.txt")).to eq(true)
 
         expect(Fastlane::Actions.lane_context[Fastlane::Actions::SharedValues::LANE_NAME]).to eq("mac beta")
       end
@@ -94,12 +252,12 @@ describe Fastlane do
       it "calls a block for a given platform (android - beta)" do
         @ff.runner.execute('beta', 'android')
 
-        expect(File.exist?('/tmp/fastlane/android_beta.txt')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/before_all_android.txt')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/after_all_android.txt')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/before_all.txt')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/before_each_beta.txt')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/after_each_beta.txt')).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/android_beta.txt")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/before_all_android.txt")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/after_all_android.txt")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/before_all.txt")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/before_each_beta.txt")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/after_each_beta.txt")).to eq(true)
 
         expect(Fastlane::Actions.lane_context[Fastlane::Actions::SharedValues::LANE_NAME]).to eq("android beta")
       end
@@ -109,13 +267,13 @@ describe Fastlane do
           @ff.runner.execute('witherror', 'android')
         end.to raise_error('my exception')
 
-        expect(File.exist?('/tmp/fastlane/before_all_android.txt')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/after_all_android.txt')).to eq(false)
-        expect(File.exist?('/tmp/fastlane/android_error.txt')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/error.txt')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/before_all.txt')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/before_each_witherror.txt')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/after_each_witherror.txt')).to eq(false)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/before_all_android.txt")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/after_all_android.txt")).to eq(false)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/android_error.txt")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/error.txt")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/before_all.txt")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/before_each_witherror.txt")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/after_each_witherror.txt")).to eq(false)
 
         expect(Fastlane::Actions.lane_context[Fastlane::Actions::SharedValues::PLATFORM_NAME]).to eq(:android)
       end
@@ -123,40 +281,40 @@ describe Fastlane do
       it "allows calls without a platform (nil - anotherroot)" do
         @ff.runner.execute('anotherroot')
 
-        expect(File.exist?('/tmp/fastlane/before_all_android.txt')).to eq(false)
-        expect(File.exist?('/tmp/fastlane/after_all_android.txt')).to eq(false)
-        expect(File.exist?('/tmp/fastlane/android_error.txt')).to eq(false)
-        expect(File.exist?('/tmp/fastlane/error.txt')).to eq(false)
-        expect(File.exist?('/tmp/fastlane/before_all.txt')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/another_root.txt')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/before_each_anotherroot.txt')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/after_each_anotherroot.txt')).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/before_all_android.txt")).to eq(false)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/after_all_android.txt")).to eq(false)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/android_error.txt")).to eq(false)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/error.txt")).to eq(false)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/before_all.txt")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/another_root.txt")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/before_each_anotherroot.txt")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/after_each_anotherroot.txt")).to eq(true)
 
         expect(Fastlane::Actions.lane_context[Fastlane::Actions::SharedValues::LANE_NAME]).to eq("anotherroot")
         expect(Fastlane::Actions.lane_context[Fastlane::Actions::SharedValues::PLATFORM_NAME]).to eq(nil)
       end
 
       it "logs a warning if and unsupported action is called on an non officially supported platform" do
-        expect(FastlaneCore::UI).to receive(:important).with("Action 'frameit' isn't known to support operating system 'android'.")
+        expect(FastlaneCore::UI).to receive(:important).with("Action 'team_name' isn't known to support operating system 'android'.")
         @ff.runner.execute('unsupported_action', 'android')
       end
     end
 
     describe "Different Fastfiles" do
       it "execute different envs" do
-        FileUtils.rm_rf('/tmp/fastlane/')
-        FileUtils.mkdir_p('/tmp/fastlane/')
+        FileUtils.rm_rf(FASTLANE_SPEC_SCRATCH)
+        FileUtils.mkdir_p(FASTLANE_SPEC_SCRATCH)
 
         ff = Fastlane::FastFile.new('./fastlane/spec/fixtures/fastfiles/Fastfile1')
         ff.runner.execute(:deploy)
-        expect(File.exist?('/tmp/fastlane/before_all')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/deploy')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/test')).to eq(false)
-        expect(File.exist?('/tmp/fastlane/after_all')).to eq(true)
-        expect(File.read("/tmp/fastlane/after_all")).to eq("deploy")
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/before_all")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/deploy")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/test")).to eq(false)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/after_all")).to eq(true)
+        expect(File.read("#{FASTLANE_SPEC_SCRATCH}/after_all")).to eq("deploy")
 
         ff.runner.execute(:test)
-        expect(File.exist?('/tmp/fastlane/test')).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/test")).to eq(true)
       end
 
       it "prints a warning if a lane is called like an action" do
@@ -184,10 +342,10 @@ describe Fastlane do
 
         ff.runner.execute(:something, nil, { value: time })
 
-        expect(File.read("/tmp/before_all.txt")).to eq(time)
-        expect(File.read("/tmp/after_all.txt")).to eq(time)
-        File.delete("/tmp/before_all.txt")
-        File.delete("/tmp/after_all.txt")
+        expect(File.read("#{FASTLANE_SPEC_SCRATCH}/before_all.txt")).to eq(time)
+        expect(File.read("#{FASTLANE_SPEC_SCRATCH}/after_all.txt")).to eq(time)
+        File.delete("#{FASTLANE_SPEC_SCRATCH}/before_all.txt")
+        File.delete("#{FASTLANE_SPEC_SCRATCH}/after_all.txt")
       end
 
       it "allows the user to invent a new platform" do
@@ -208,21 +366,21 @@ describe Fastlane do
         ff = Fastlane::FastFile.new('./fastlane/spec/fixtures/fastfiles/FastfileLaneBlocks')
         ff.runner.execute(:run_ios, :ios)
 
-        expect(File.exist?('/tmp/fastlane/before_all')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/after_all')).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/before_all")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/after_all")).to eq(true)
 
-        before_each = File.read("/tmp/fastlane/before_each")
-        after_each = File.read("/tmp/fastlane/after_each")
+        before_each = File.read("#{FASTLANE_SPEC_SCRATCH}/before_each")
+        after_each = File.read("#{FASTLANE_SPEC_SCRATCH}/after_each")
 
         %w(run lane1 lane2).each do |lane|
           expect(before_each).to include(lane)
           expect(after_each).to include(lane)
         end
 
-        File.delete("/tmp/fastlane/before_each")
-        File.delete("/tmp/fastlane/after_each")
-        File.delete("/tmp/fastlane/before_all")
-        File.delete("/tmp/fastlane/after_all")
+        File.delete("#{FASTLANE_SPEC_SCRATCH}/before_each")
+        File.delete("#{FASTLANE_SPEC_SCRATCH}/after_each")
+        File.delete("#{FASTLANE_SPEC_SCRATCH}/before_all")
+        File.delete("#{FASTLANE_SPEC_SCRATCH}/after_all")
       end
 
       it "Parameters are also passed to the error block" do
@@ -233,8 +391,8 @@ describe Fastlane do
           ff.runner.execute(:crash, nil, { value: time })
         end.to raise_error("Wups") # since we cause a crash
 
-        expect(File.read("/tmp/error.txt")).to eq(time)
-        File.delete("/tmp/error.txt")
+        expect(File.read("#{FASTLANE_SPEC_SCRATCH}/error.txt")).to eq(time)
+        File.delete("#{FASTLANE_SPEC_SCRATCH}/error.txt")
       end
 
       it "Exception in error block are swallowed and shown, and original exception is re-raised" do
@@ -253,35 +411,45 @@ describe Fastlane do
           ff = Fastlane::FastFile.new('./fastlane/spec/fixtures/fastfiles/SwitcherFastfile')
           ff.runner.execute(:lane1, :ios)
 
-          expect(File.read("/tmp/deliver_result.txt")).to eq("Lane 2 + parameter")
+          expect(File.read("#{FASTLANE_SPEC_SCRATCH}/deliver_result.txt")).to eq("Lane 2 + parameter")
         end
 
         it "use case 2: passing no parameter to a lane that takes parameters" do
           ff = Fastlane::FastFile.new('./fastlane/spec/fixtures/fastfiles/SwitcherFastfile')
           ff.runner.execute(:lane3, :ios)
 
-          expect(File.read("/tmp/deliver_result.txt")).to eq("Lane 2 + ")
+          expect(File.read("#{FASTLANE_SPEC_SCRATCH}/deliver_result.txt")).to eq("Lane 2 + ")
         end
 
         it "use case 3: Calling a lane directly which takes parameters" do
           ff = Fastlane::FastFile.new('./fastlane/spec/fixtures/fastfiles/SwitcherFastfile')
           ff.runner.execute(:lane4, :ios)
 
-          expect(File.read("/tmp/deliver_result.txt")).to eq("{}")
+          expect(File.read("#{FASTLANE_SPEC_SCRATCH}/deliver_result.txt")).to eq("{}")
         end
 
         it "use case 4: Passing parameters to another lane" do
           ff = Fastlane::FastFile.new('./fastlane/spec/fixtures/fastfiles/SwitcherFastfile')
           ff.runner.execute(:lane5, :ios)
+          expected_value = if Gem::Version.create('3.4.0') <= Gem::Version.create(RUBY_VERSION)
+                             "{key: :value}"
+                           else
+                             "{:key=>:value}"
+                           end
 
-          expect(File.read("/tmp/deliver_result.txt")).to eq("{:key=>:value}")
+          expect(File.read("#{FASTLANE_SPEC_SCRATCH}/deliver_result.txt")).to eq(expected_value)
         end
 
         it "use case 5: Calling a method outside of the current platform" do
           ff = Fastlane::FastFile.new('./fastlane/spec/fixtures/fastfiles/SwitcherFastfile')
           ff.runner.execute(:call_general_lane, :ios)
+          expected_value = if Gem::Version.create('3.4.0') <= Gem::Version.create(RUBY_VERSION)
+                             "{random: :value}"
+                           else
+                             "{:random=>:value}"
+                           end
 
-          expect(File.read("/tmp/deliver_result.txt")).to eq("{:random=>:value}")
+          expect(File.read("#{FASTLANE_SPEC_SCRATCH}/deliver_result.txt")).to eq(expected_value)
         end
 
         it "calling a lane that doesn't exist" do
@@ -308,19 +476,19 @@ describe Fastlane do
       end
 
       it "execute different envs with lane in before block" do
-        FileUtils.rm_rf('/tmp/fastlane/')
-        FileUtils.mkdir_p('/tmp/fastlane/')
+        FileUtils.rm_rf(FASTLANE_SPEC_SCRATCH)
+        FileUtils.mkdir_p(FASTLANE_SPEC_SCRATCH)
 
         ff = Fastlane::FastFile.new('./fastlane/spec/fixtures/fastfiles/Fastfile2')
         ff.runner.execute(:deploy)
-        expect(File.exist?('/tmp/fastlane/before_all_deploy')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/deploy')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/test')).to eq(false)
-        expect(File.exist?('/tmp/fastlane/after_all')).to eq(true)
-        expect(File.read("/tmp/fastlane/after_all")).to eq("deploy")
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/before_all_deploy")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/deploy")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/test")).to eq(false)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/after_all")).to eq(true)
+        expect(File.read("#{FASTLANE_SPEC_SCRATCH}/after_all")).to eq("deploy")
 
         ff.runner.execute(:test)
-        expect(File.exist?('/tmp/fastlane/test')).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/test")).to eq(true)
       end
 
       it "automatically converts invalid quotations" do
@@ -349,18 +517,33 @@ lane :beta do
   sigh(app_identifier: "hi"
 end
 RUBY
-        expect(UI).to receive(:user_error!).with(%r{Syntax error in your Fastfile on line 17: fastlane/spec/fixtures/fastfiles/FastfileSytnaxError:17: syntax error, unexpected (keyword_end|end), expecting '\)'})
-        ff = Fastlane::FastFile.new('./fastlane/spec/fixtures/fastfiles/FastfileSytnaxError')
+        expected_message = if Gem::Version.create('3.4.0') <= Gem::Version.create(RUBY_VERSION)
+                             %r{Syntax error in your Fastfile on line 17: fastlane/spec/fixtures/fastfiles/FastfileSyntaxError:17: syntax error found}
+                           else
+                             %r{Syntax error in your Fastfile on line 17: fastlane/spec/fixtures/fastfiles/FastfileSyntaxError:17: syntax error, unexpected (keyword_end|end|`end'), expecting '\)'}
+                           end
+        expect(UI).to receive(:user_error!).with(expected_message)
+        ff = Fastlane::FastFile.new('./fastlane/spec/fixtures/fastfiles/FastfileSyntaxError')
       end
 
       it "properly shows an error message when there is a syntax error in the Fastfile from string" do
         # ruby error message differs in 2.5 and earlier. We use a matcher
-        expect(UI).to receive(:content_error).with(<<-RUBY.chomp, "3")
+        expected_arg = if Gem::Version.create('3.4.0') <= Gem::Version.create(RUBY_VERSION)
+                         "2"
+                       else
+                         "3"
+                       end
+        expect(UI).to receive(:content_error).with(<<-RUBY.chomp, expected_arg)
         lane :test do
           cases = [:abc,
         end
         RUBY
-        expect(UI).to receive(:user_error!).with(/Syntax error in your Fastfile on line 3: \(eval\):3: syntax error, unexpected (keyword_end|end), expecting '\]'\n        end\n.*/)
+        expected_message = if Gem::Version.create('3.4.0') <= Gem::Version.create(RUBY_VERSION)
+                             /Syntax error in your Fastfile on line 2: \(eval\):2: syntax errors found.*/
+                           else
+                             /Syntax error in your Fastfile on line 3: \(eval\):3: syntax error, unexpected (keyword_end|end|`end'), expecting '\]'\n        end\n.*/
+                           end
+        expect(UI).to receive(:user_error!).with(expected_message)
 
         ff = Fastlane::FastFile.new.parse(<<-RUBY.chomp)
         lane :test do
@@ -391,8 +574,13 @@ lane :beta do
   sigh(app_identifier: "hi"
 end
 RUBY
-        expect(UI).to receive(:user_error!).with(%r{Syntax error in your Fastfile on line 17: fastlane/spec/fixtures/fastfiles/FastfileSytnaxError:17: syntax error, unexpected (keyword_end|end), expecting '\)'})
-        ff.import('./FastfileSytnaxError')
+        expected_message = if Gem::Version.create('3.4.0') <= Gem::Version.create(RUBY_VERSION)
+                             %r{Syntax error in your Fastfile on line 17: fastlane/spec/fixtures/fastfiles/FastfileSyntaxError:17: syntax error found}
+                           else
+                             %r{Syntax error in your Fastfile on line 17: fastlane/spec/fixtures/fastfiles/FastfileSyntaxError:17: syntax error, unexpected (keyword_end|end|`end'), expecting '\)'}
+                           end
+        expect(UI).to receive(:user_error!).with(expected_message)
+        ff.import('./FastfileSyntaxError')
       end
 
       it "imports actions associated with a Fastfile before their Fastfile" do
@@ -426,21 +614,21 @@ RUBY
       end
 
       it "calls the error block when an error occurs" do
-        FileUtils.rm_rf('/tmp/fastlane/')
-        FileUtils.mkdir_p('/tmp/fastlane/')
+        FileUtils.rm_rf(FASTLANE_SPEC_SCRATCH)
+        FileUtils.mkdir_p(FASTLANE_SPEC_SCRATCH)
 
         ff = Fastlane::FastFile.new('./fastlane/spec/fixtures/fastfiles/Fastfile1')
         expect do
           ff.runner.execute(:error_causing_lane)
         end.to raise_exception("divided by 0")
 
-        expect(File.exist?('/tmp/fastlane/before_all')).to eq(true)
-        expect(File.exist?('/tmp/fastlane/deploy')).to eq(false)
-        expect(File.exist?('/tmp/fastlane/test')).to eq(false)
-        expect(File.exist?('/tmp/fastlane/after_all')).to eq(false)
-        expect(File.exist?('/tmp/fastlane/error')).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/before_all")).to eq(true)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/deploy")).to eq(false)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/test")).to eq(false)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/after_all")).to eq(false)
+        expect(File.exist?("#{FASTLANE_SPEC_SCRATCH}/error")).to eq(true)
 
-        expect(File.read("/tmp/fastlane/error")).to eq("error_causing_lane")
+        expect(File.read("#{FASTLANE_SPEC_SCRATCH}/error")).to eq("error_causing_lane")
       end
 
       it "raises an error if one lane is defined multiple times" do

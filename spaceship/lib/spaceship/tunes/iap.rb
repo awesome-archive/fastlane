@@ -15,14 +15,14 @@ module Spaceship
       # @return (Spaceship::Tunes::Application) A reference to the application
       attr_accessor :application
 
-      # @return (Spaceship::Tunes::IAPFamilies) A reference to the familie list
+      # @return (Spaceship::Tunes::IAPFamilies) A reference to the family list
       def families
         attrs = {}
         attrs[:application] = self.application
         Tunes::IAPFamilies.new(attrs)
       end
 
-      # Creates a new In-App-Purchese on App Store Connect
+      # Creates a new In-App-Purchase on App Store Connect
       # if the In-App-Purchase already exists an exception is raised. Spaceship::TunesClient::ITunesConnectError
       # @param type (String): The Type of the in-app-purchase (Spaceship::Tunes::IAPType::CONSUMABLE,Spaceship::Tunes::IAPType::NON_CONSUMABLE,Spaceship::Tunes::IAPType::RECURRING,Spaceship::Tunes::IAPType::NON_RENEW_SUBSCRIPTION)
       # @param versions (Hash): a Hash of the languages
@@ -49,7 +49,7 @@ module Spaceship
       #      tier: 1
       #    }
       #  ]
-      # @param family_id (String) Only used on RECURRING purchases, assigns the In-App-Purchase to a specific familie
+      # @param family_id (String) Only used on RECURRING purchases, assigns the In-App-Purchase to a specific family
       # @param subscription_free_trial (String) Free Trial duration (1w,1m,3m....)
       # @param subscription_duration (String) 1w,1m.....
       # @param subscription_price_target (Hash) Only used on RECURRING purchases, used to set the
@@ -65,6 +65,7 @@ module Spaceship
                   reference_name: nil,
                   product_id: nil,
                   cleared_for_sale: true,
+                  merch_screenshot: nil,
                   review_notes: nil,
                   review_screenshot: nil,
                   pricing_intervals: nil,
@@ -78,6 +79,7 @@ module Spaceship
                            reference_name: reference_name,
                            product_id: product_id,
                            cleared_for_sale: cleared_for_sale,
+                           merch_screenshot: merch_screenshot,
                            review_notes: review_notes,
                            review_screenshot: review_screenshot,
                            pricing_intervals: pricing_intervals,
@@ -103,17 +105,6 @@ module Spaceship
         end
       end
 
-      # find a specific product
-      # @param product_id (String) Product Id
-      def find(product_id)
-        all.each do |product|
-          if product.product_id == product_id
-            return product
-          end
-        end
-        return nil
-      end
-
       # return all available In-App-Purchase's of current app
       # this is not paged inside iTC-API so if you have a lot if IAP's (2k+)
       # it might take some time to load, same as it takes when you load the list via App Store Connect
@@ -128,6 +119,32 @@ module Spaceship
           return_iaps << loaded_iap
         end
         return_iaps
+      end
+
+      # find a specific product
+      # @param product_id (String) Product Id
+      def find(product_id)
+        all.each do |product|
+          if product.product_id == product_id
+            return product
+          end
+        end
+        return nil
+      end
+
+      # generate app-specific shared secret (or regenerate if exists)
+      def generate_shared_secret
+        client.generate_shared_secret(app_id: self.application.apple_id)
+      end
+
+      # retrieve app-specific shared secret
+      # @param create (Boolean) Create new shared secret if does not exist
+      def get_shared_secret(create: false)
+        secret = client.get_shared_secret(app_id: self.application.apple_id)
+        if create && secret.nil?
+          secret = generate_shared_secret
+        end
+        secret
       end
 
       private

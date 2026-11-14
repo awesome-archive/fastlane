@@ -38,6 +38,22 @@ describe Deliver::HtmlGenerator do
       end
     end
 
+    context 'with an app icon' do
+      let(:options) do
+        {
+          name: { 'en-US' => 'Fastlane Demo' },
+          description: { 'en-US' => 'Demo description' },
+          app_icon: 'fastlane/metadata/app_icon.png'
+        }
+      end
+
+      it 'renders HTML' do
+        capture = render(options, screenshots)
+        expect(capture).to match(/<html>/)
+        expect(capture).to include('app_icon.png')
+      end
+    end
+
     private
 
     def render(options, screenshots)
@@ -45,6 +61,22 @@ describe Deliver::HtmlGenerator do
         path = generator.render(options, screenshots, dir)
         return File.read(path)
       end
+    end
+  end
+
+  describe :run do
+    it "passes html_path as a separate argument to system, not via shell interpolation" do
+      options = { force: false }
+      screenshots = []
+      malicious_path = "/tmp/foo'$(touch /tmp/pwned).html"
+
+      allow(generator).to receive(:render).and_return(malicious_path)
+      allow(FastlaneCore::UI).to receive(:important)
+      allow(FastlaneCore::UI).to receive(:confirm).and_return(true)
+      allow(FastlaneCore::UI).to receive(:success)
+      expect(generator).to receive(:system).with("open", malicious_path)
+
+      generator.run(options, screenshots)
     end
   end
 

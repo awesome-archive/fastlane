@@ -37,33 +37,40 @@ describe FastlaneCore do
     end
 
     describe "#update_command" do
-      before do
-        ENV.delete("BUNDLE_BIN_PATH")
-        ENV.delete("BUNDLE_GEMFILE")
+      # Scoped, not deleted. These two decide Helper.bundler?, and dropping them
+      # for the rest of the process makes every later example look as though it
+      # is not running under bundler. take_off then finds the Gemfile in the
+      # working directory and emits "fastlane detected a Gemfile", an extra call
+      # that was failing ruby_version_warning_spec's `.once` constraint on
+      # UI.important. See fastlane#30184.
+      around(:each) do |example|
+        FastlaneSpec::Env.with_env_values("BUNDLE_BIN_PATH" => nil, "BUNDLE_GEMFILE" => nil) do
+          example.run
+        end
       end
 
       it "works a custom gem name" do
-        expect(FastlaneCore::UpdateChecker.update_command(gem_name: "gym")).to eq("sudo gem install gym")
+        expect(FastlaneCore::UpdateChecker.update_command(gem_name: "gym")).to eq("gem install gym")
       end
 
       it "works with system ruby" do
-        expect(FastlaneCore::UpdateChecker.update_command).to eq("sudo gem install fastlane")
+        expect(FastlaneCore::UpdateChecker.update_command).to eq("gem install fastlane")
       end
 
       it "works with bundler" do
-        with_env_values('BUNDLE_BIN_PATH' => '/tmp') do
+        FastlaneSpec::Env.with_env_values('BUNDLE_BIN_PATH' => '/tmp') do
           expect(FastlaneCore::UpdateChecker.update_command).to eq("bundle update fastlane")
         end
       end
 
       it "works with bundled fastlane" do
-        with_env_values('FASTLANE_SELF_CONTAINED' => 'true') do
+        FastlaneSpec::Env.with_env_values('FASTLANE_SELF_CONTAINED' => 'true') do
           expect(FastlaneCore::UpdateChecker.update_command).to eq("fastlane update_fastlane")
         end
       end
 
       it "works with Fabric.app installed fastlane" do
-        with_env_values('FASTLANE_SELF_CONTAINED' => 'false') do
+        FastlaneSpec::Env.with_env_values('FASTLANE_SELF_CONTAINED' => 'false') do
           expect(FastlaneCore::UpdateChecker.update_command).to eq("the Fabric app. Launch the app and navigate to the fastlane tab to get the most recent version.")
         end
       end

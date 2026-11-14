@@ -69,6 +69,17 @@ describe Fastlane do
         end
       end
 
+      context "as string with force option" do
+        let(:path) { "myfile.txt" }
+
+        it "executes the correct git command" do
+          allow(Fastlane::Actions).to receive(:sh).with("git add --force #{path}", anything).and_return("")
+          result = Fastlane::FastFile.new.parse("lane :test do
+            git_add(path: '#{path}', force: true)
+          end").runner.execute(:test)
+        end
+      end
+
       context "without parameters" do
         it "executes the correct git command" do
           allow(Fastlane::Actions).to receive(:sh).with("git add .", anything).and_return("")
@@ -79,7 +90,7 @@ describe Fastlane do
       end
 
       it "logs the command if verbose" do
-        with_verbose(true) do
+        FastlaneSpec::Env.with_verbose(true) do
           allow(Fastlane::Actions).to receive(:sh).with(anything, { log: true }).and_return("")
           result = Fastlane::FastFile.new.parse("lane :test do
             git_add(path: 'foo.bar')
@@ -88,7 +99,7 @@ describe Fastlane do
       end
 
       it "passes the deprecated pathspec parameter to path parameter" do
-        with_verbose(true) do
+        FastlaneSpec::Env.with_verbose(true) do
           allow(Fastlane::Actions).to receive(:sh).with(anything, { log: true }).and_return("")
           result = Fastlane::FastFile.new.parse("lane :test do
             git_add(pathspec: 'myfile.txt')

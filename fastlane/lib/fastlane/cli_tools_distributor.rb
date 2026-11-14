@@ -23,7 +23,7 @@ module Fastlane
       def take_off
         before_import_time = Time.now
 
-        if !ENV["FASTLANE_DISABLE_ANIMATION"]
+        if ENV["FASTLANE_DISABLE_ANIMATION"].nil?
           # Usually in the fastlane code base we use
           #
           #   Helper.show_loading_indicator
@@ -44,9 +44,16 @@ module Fastlane
         else
           require "fastlane"
         end
+
+        # Loading any .env files before any lanes are called since
+        # variables like FASTLANE_HIDE_CHANGELOG, SKIP_SLOW_FASTLANE_WARNING
+        # and FASTLANE_DISABLE_COLORS need to be set early on in execution
+        load_dot_env
+
         # We want to avoid printing output other than the version number if we are running `fastlane -v`
         unless running_version_command? || running_init_command?
           print_bundle_exec_warning(is_slow: (Time.now - before_import_time > 3))
+          print_running_version
         end
 
         # Try to check UTF-8 with `locale`, fallback to environment variables
@@ -59,11 +66,14 @@ module Fastlane
           end
         end
 
-        # Loading any .env files before any lanes are called since
-        # variables like FASTLANE_HIDE_CHANGELOG and FASTLANE_DISABLE_COLORS
-        # need to be set early on in execution
-        require 'fastlane/helper/dotenv_helper'
-        Fastlane::Helper::DotenvHelper.load_dot_env(nil)
+        # Ruby version warning
+        if Gem::Version.new(RUBY_VERSION) < Gem::Version.new(Fastlane::SUGGESTED_MINIMUM_RUBY) && !FastlaneCore::Env.truthy?("FASTLANE_SKIP_RUBY_VERSION_WARNING")
+          warn = "WARNING: Support for your Ruby version (#{RUBY_VERSION}) is going away. fastlane will soon require Ruby #{Fastlane::SUGGESTED_MINIMUM_RUBY} or newer."
+          UI.important(warn)
+          at_exit do
+            UI.important(warn)
+          end
+        end
 
         # Needs to go after load_dot_env for variable FASTLANE_SKIP_UPDATE_CHECK
         FastlaneCore::UpdateChecker.start_looking_for_update('fastlane')
@@ -71,10 +81,14 @@ module Fastlane
         # Disabling colors if environment variable set
         require 'fastlane_core/ui/disable_colors' if FastlaneCore::Helper.colors_disabled?
 
+        # Set interactive environment variable for spaceship (which can't require fastlane_core)
+        ENV["FASTLANE_IS_INTERACTIVE"] = FastlaneCore::UI.interactive?.to_s
+
         ARGV.unshift("spaceship") if ARGV.first == "spaceauth"
         tool_name = ARGV.first ? ARGV.first.downcase : nil
 
         tool_name = process_emojis(tool_name)
+        tool_name = map_aliased_tools(tool_name)
 
         if tool_name && Fastlane::TOOLS.include?(tool_name.to_sym) && !available_lanes.include?(tool_name.to_sym)
           # Triggering a specific tool
@@ -119,7 +133,42 @@ module Fastlane
           Fastlane::CommandsGenerator.start
         end
       ensure
-        FastlaneCore::UpdateChecker.show_update_status('fastlane', Fastlane::VERSION)
+        # If the ruby setup if broken, and UpdateChecker fails catastrophically,
+        # we don't want to hide the original exception. We just print it
+        # see https://github.com/fastlane/fastlane/issues/29916
+        begin
+          FastlaneCore::UpdateChecker.show_update_status('fastlane', Fastlane::VERSION)
+        # rubocop:disable Lint/RescueException
+        rescue Exception => e
+          UI.error(e.to_s)
+        end
+        # rubocop:enable Lint/RescueException
+      end
+
+      def map_aliased_tools(tool_name)
+        Fastlane::TOOL_ALIASES[tool_name&.to_sym] || tool_name
+      end
+
+      # Since loading dotenv should respect additional environments passed using
+      # --env, we must extract the arguments out of ARGV and process them before
+      # calling into commander. This is required since the ENV must be configured
+      # before running any other commands in order to correctly respect variables
+      # like FASTLANE_HIDE_CHANGELOG and FASTLANE_DISABLE_COLORS
+      def load_dot_env
+        env_cl_param = lambda do
+          index = ARGV.index("--env")
+          return nil if index.nil?
+          ARGV.delete_at(index)
+
+          return nil if ARGV[index].nil?
+          value = ARGV[index]
+          ARGV.delete_at(index)
+
+          value
+        end
+
+        require 'fastlane/helper/dotenv_helper'
+        Fastlane::Helper::DotenvHelper.load_dot_env(env_cl_param.call)
       end
 
       # Since fastlane also supports the rocket and biceps emoji as executable
@@ -131,8 +180,21 @@ module Fastlane
         }[tool_name] || tool_name
       end
 
+      # Which fastlane a log comes from: `fastlane env`, run later by hand, can describe another install. See #29938.
+      def print_running_version
+        source = FastlaneCore::Helper.install_method
+        if ARGV.include?("--verbose")
+          require "fastlane/environment_printer"
+          location = FastlaneCore::Helper.bundler? ? ENV["BUNDLE_GEMFILE"] : $PROGRAM_NAME
+          # Dir.home rather than ENV['HOME'], which does not match the paths Ruby gives on Windows
+          source += ": #{EnvironmentPrinter.anonymized_path(location.to_s, Dir.home)}"
+        end
+
+        UI.message("fastlane #{Fastlane::VERSION} (Ruby #{RUBY_VERSION}, #{source})")
+      end
+
       def print_bundle_exec_warning(is_slow: false)
-        return if FastlaneCore::Helper.bundler? # user is alread using bundler
+        return if FastlaneCore::Helper.bundler? # user is already using bundler
         return if FastlaneCore::Env.truthy?('SKIP_SLOW_FASTLANE_WARNING') # user disabled the warnings
         return if FastlaneCore::Helper.contained_fastlane? # user uses the bundled fastlane
 
@@ -142,8 +204,8 @@ module Fastlane
           # Let's tell the user how to use `bundle exec`
           # We show this warning no matter if the command is slow or not
           UI.important("fastlane detected a Gemfile in the current directory")
-          UI.important("however it seems like you don't use `bundle exec`")
-          UI.important("to launch fastlane faster, please use")
+          UI.important("However, it seems like you didn't use `bundle exec`")
+          UI.important("To launch fastlane faster, please use")
           UI.message("")
           UI.command "bundle exec fastlane #{ARGV.join(' ')}"
           UI.message("")

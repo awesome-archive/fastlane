@@ -1,10 +1,12 @@
 require 'plist'
+require 'time'
 
 require_relative '../module'
 require_relative '../test_command_generator'
 require_relative '../collector'
 require_relative '../fixes/hardware_keyboard_fix'
 require_relative '../fixes/simulator_zoom_fix'
+require_relative '../fixes/simulator_shared_pasteboard'
 
 module Snapshot
   class SimulatorLauncherBase
@@ -16,6 +18,7 @@ module Snapshot
 
     def initialize(launcher_configuration: nil)
       @launcher_config = launcher_configuration
+      @device_boot_datetime = DateTime.now
     end
 
     def collected_errors
@@ -49,21 +52,39 @@ module Snapshot
       # Kill and shutdown all currently running simulators so that the following settings
       # changes will be picked up when they are started again.
       Snapshot.kill_simulator # because of https://github.com/fastlane/fastlane/issues/2533
-      `xcrun simctl shutdown booted &> /dev/null`
+      Helper.backticks("xcrun simctl shutdown booted", print: FastlaneCore::Globals.verbose?)
 
       Fixes::SimulatorZoomFix.patch
       Fixes::HardwareKeyboardFix.patch
+      Fixes::SharedPasteboardFix.patch
 
       device_types.each do |type|
-        if launcher_config.erase_simulator || launcher_config.localize_simulator
-          erase_simulator(type)
+        if launcher_config.erase_simulator || launcher_config.localize_simulator || !launcher_config.dark_mode.nil?
+          if launcher_config.erase_simulator
+            erase_simulator(type)
+          end
           if launcher_config.localize_simulator
             localize_simulator(type, language, locale)
           end
-        elsif launcher_config.reinstall_app
+          unless launcher_config.dark_mode.nil?
+            interface_style(type, launcher_config.dark_mode)
+          end
+        end
+        if launcher_config.reinstall_app && !launcher_config.erase_simulator
           # no need to reinstall if device has been erased
           uninstall_app(type)
         end
+        if launcher_config.disable_slide_to_type
+          disable_slide_to_type(type)
+        end
+      end
+
+      unless launcher_config.headless
+        simulator_path = File.join(Helper.xcode_path, 'Applications', 'Simulator.app')
+        device_udid = TestCommandGenerator.device_udid(device_types.first)
+        command = "open -a #{simulator_path.shellescape} -g"
+        command += " --args -CurrentDeviceUDID #{device_udid}" if device_udid
+        Helper.backticks(command, print: FastlaneCore::Globals.verbose?)
       end
     end
 
@@ -76,22 +97,63 @@ module Snapshot
         device_udid = TestCommandGenerator.device_udid(device_type)
 
         UI.message("Launch Simulator #{device_type}")
-        Helper.backticks("xcrun instruments -w #{device_udid} &> /dev/null")
+        if FastlaneCore::Helper.xcode_at_least?("13")
+          Helper.backticks("open -a Simulator.app --args -CurrentDeviceUDID #{device_udid}", print: FastlaneCore::Globals.verbose?)
+        else
+          Helper.backticks("xcrun instruments -w #{device_udid}", print: FastlaneCore::Globals.verbose?)
+        end
 
         paths.each do |path|
           UI.message("Adding '#{path}'")
 
           # Attempting addmedia since addphoto and addvideo are deprecated
-          output = Helper.backticks("xcrun simctl addmedia #{device_udid} #{path.shellescape} &> /dev/null")
+          output = Helper.backticks("xcrun simctl addmedia #{device_udid} #{path.shellescape}", print: FastlaneCore::Globals.verbose?)
 
           # Run legacy addphoto and addvideo if addmedia isn't found
-          # Output will be empty strin gif it was a success
+          # Output will be empty string if it was a success
           # Output will contain "usage: simctl" if command not found
           if output.include?('usage: simctl')
-            Helper.backticks("xcrun simctl add#{media_type} #{device_udid} #{path.shellescape} &> /dev/null")
+            Helper.backticks("xcrun simctl add#{media_type} #{device_udid} #{path.shellescape}", print: FastlaneCore::Globals.verbose?)
           end
         end
       end
+    end
+
+    def override_status_bar(device_type, arguments = nil)
+      device_udid = TestCommandGenerator.device_udid(device_type)
+
+      UI.message("Launch Simulator #{device_type}")
+      # Boot the simulator and wait for it to finish booting
+      Helper.backticks("xcrun simctl bootstatus #{device_udid} -b", print: FastlaneCore::Globals.verbose?)
+
+      # "Booted" status is not enough for to adjust the status bar
+      # Simulator could still be booting with Apple logo
+      # Need to wait "some amount of time" until home screen shows
+      boot_sleep = ENV["SNAPSHOT_SIMULATOR_WAIT_FOR_BOOT_TIMEOUT"].to_i || 10
+      UI.message("Waiting #{boot_sleep} seconds for device to fully boot before overriding status bar... Set 'SNAPSHOT_SIMULATOR_WAIT_FOR_BOOT_TIMEOUT' environment variable to adjust timeout")
+      sleep(boot_sleep) if boot_sleep > 0
+
+      UI.message("Overriding Status Bar")
+
+      if arguments.nil? || arguments.empty?
+        # The time must be passed as HH:MM format (e.g., "09:41")
+        # Note: Despite the simctl manual stating ISO date strings are supported, only HH:MM format actually works
+        time = Time.new(2007, 1, 9, 9, 41, 0)
+        time_str = time.strftime("%H:%M")
+
+        # If you don't override the operator name, you'll get "Carrier" in the status bar on no-notch devices such as iPhone 8. Pass an empty string to blank it out.
+
+        arguments = "--time #{time_str} --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode active --operatorName '' --cellularBars 4 --batteryState charged --batteryLevel 100"
+      end
+
+      Helper.backticks("xcrun simctl status_bar #{device_udid} override #{arguments}", print: FastlaneCore::Globals.verbose?)
+    end
+
+    def clear_status_bar(device_type)
+      device_udid = TestCommandGenerator.device_udid(device_type)
+
+      UI.message("Clearing Status Bar Override")
+      Helper.backticks("xcrun simctl status_bar #{device_udid} clear", print: FastlaneCore::Globals.verbose?)
     end
 
     def uninstall_app(device_type)
@@ -107,7 +169,7 @@ module Snapshot
 
       UI.important("Erasing #{device_type}...")
 
-      `xcrun simctl erase #{device_udid} &> /dev/null`
+      Helper.backticks("xcrun simctl erase #{device_udid}", print: FastlaneCore::Globals.verbose?)
     end
 
     def localize_simulator(device_type, language, locale)
@@ -124,6 +186,26 @@ module Snapshot
       end
     end
 
+    def interface_style(device_type, dark_mode)
+      device_udid = TestCommandGenerator.device_udid(device_type)
+      if device_udid
+        plist = {
+          UserInterfaceStyleMode: (dark_mode ? 2 : 1)
+        }
+        UI.message("Setting interface style #{device_type} (UserInterfaceStyleMode=#{dark_mode})")
+        plist_path = "#{ENV['HOME']}/Library/Developer/CoreSimulator/Devices/#{device_udid}/data/Library/Preferences/com.apple.uikitservices.userInterfaceStyleMode.plist"
+        File.write(plist_path, Plist::Emit.dump(plist))
+      end
+    end
+
+    def disable_slide_to_type(device_type)
+      device_udid = TestCommandGenerator.device_udid(device_type)
+      if device_udid
+        UI.message("Disabling slide to type on #{device_type}")
+        FastlaneCore::Simulator.disable_slide_to_type(udid: device_udid)
+      end
+    end
+
     def copy_simulator_logs(device_names, language, locale, launch_arguments)
       return unless launcher_config.output_simulator_logs
 
@@ -136,7 +218,7 @@ module Snapshot
 
         UI.header("Collecting system logs #{device_name} - #{language}")
         log_identity = Digest::MD5.hexdigest(components.join("-"))
-        FastlaneCore::Simulator.copy_logs(device, log_identity, language_folder)
+        FastlaneCore::Simulator.copy_logs(device, log_identity, language_folder, @device_boot_datetime)
       end
     end
   end

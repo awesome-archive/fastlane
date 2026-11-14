@@ -4,6 +4,7 @@
 # because of
 # `incompatible encoding regexp match (UTF-8 regexp with ASCII-8BIT string) (Encoding::CompatibilityError)`
 
+require 'addressable/uri'
 require 'tempfile'
 require 'xcodeproj'
 
@@ -23,7 +24,7 @@ module Gym
         parts += options
         parts += pipe
 
-        File.write(config_path, config_content) # overwrite everytime. Could be optimized
+        File.write(config_path, config_content) # overwrite every time. Could be optimized
 
         parts
       end
@@ -32,10 +33,10 @@ module Gym
         config = Gym.config
 
         options = []
-        options << "-exportOptionsPlist '#{config_path}'"
+        options << "-exportOptionsPlist #{config_path.shellescape}"
         options << "-archivePath #{BuildCommandGenerator.archive_path.shellescape}"
-        options << "-exportPath '#{temporary_output_path}'"
-        options << "-toolchain '#{config[:toolchain]}'" if config[:toolchain]
+        options << "-exportPath #{temporary_output_path.shellescape}"
+        options << "-toolchain #{config[:toolchain].shellescape}" if config[:toolchain]
         options << config[:export_xcargs] if config[:export_xcargs]
         options << config[:xcargs] if config[:xcargs]
 
@@ -51,35 +52,66 @@ module Gym
         Gym.cache[:temporary_output_path] ||= Dir.mktmpdir('gym_output')
       end
 
-      # Wrap xcodebuild to work-around ipatool dependency to system ruby
+      # Wrap xcodebuild to work around ipatool dependency to system ruby
       def wrap_xcodebuild
         require 'fileutils'
         @wrapped_xcodebuild_path ||= File.join(Gym::ROOT, "lib/assets/wrap_xcodebuild/xcbuild-safe.sh")
       end
 
       def ipa_path
-        unless Gym.cache[:ipa_path]
-          path = Dir[File.join(temporary_output_path, "*.ipa")].last
-          # We need to process generic IPA
-          if path
-            # Try to find IPA file in the output directory, used when app thinning was not set
-            Gym.cache[:ipa_path] = File.join(temporary_output_path, "#{Gym.config[:output_name]}.ipa")
-            FileUtils.mv(path, Gym.cache[:ipa_path]) unless File.expand_path(path).casecmp(File.expand_path(Gym.cache[:ipa_path]).downcase).zero?
-          elsif Dir.exist?(apps_path)
-            # Try to find "generic" IPA file inside "Apps" folder, used when app thinning was set
-            files = Dir[File.join(apps_path, "*.ipa")]
-            # Generic IPA file doesn't have suffix so its name is the shortest
-            path = files.min_by(&:length)
-            Gym.cache[:ipa_path] = File.join(temporary_output_path, "#{Gym.config[:output_name]}.ipa")
-            FileUtils.cp(path, Gym.cache[:ipa_path]) unless File.expand_path(path).casecmp(File.expand_path(Gym.cache[:ipa_path]).downcase).zero?
-          else
-            ErrorHandler.handle_empty_archive unless path
-          end
+        path = Gym.cache[:ipa_path]
+        return path if path
+
+        path = Dir[File.join(temporary_output_path, "*.ipa")].last
+        # We need to process generic IPA
+        if path
+          # Try to find IPA file in the output directory, used when app thinning was not set
+          Gym.cache[:ipa_path] = File.join(temporary_output_path, "#{Gym.config[:output_name]}.ipa")
+          FileUtils.mv(path, Gym.cache[:ipa_path]) unless File.expand_path(path).casecmp?(File.expand_path(Gym.cache[:ipa_path]).downcase)
+        elsif Dir.exist?(apps_path)
+          # Try to find "generic" IPA file inside "Apps" folder, used when app thinning was set
+          files = Dir[File.join(apps_path, "*.ipa")]
+          # Generic IPA file doesn't have suffix so its name is the shortest
+          path = files.min_by(&:length)
+          Gym.cache[:ipa_path] = File.join(temporary_output_path, "#{Gym.config[:output_name]}.ipa")
+          FileUtils.cp(path, Gym.cache[:ipa_path]) unless File.expand_path(path).casecmp?(File.expand_path(Gym.cache[:ipa_path]).downcase)
+        else
+          ErrorHandler.handle_empty_ipa unless path
         end
+
         Gym.cache[:ipa_path]
       end
 
-      # The path the the dsym file for this app. Might be nil
+      def binary_path
+        path = Gym.cache[:binary_path]
+        return path if path
+
+        path = Dir[File.join(temporary_output_path, "*.pkg")].last
+        app_path = Dir[File.join(temporary_output_path, "*.app")].last
+        # We need to process generic PKG or APP
+        if path
+          # Try to find PKG file in the output directory, used when app thinning was not set
+          Gym.cache[:binary_path] = File.join(temporary_output_path, "#{Gym.config[:output_name]}.pkg")
+          FileUtils.mv(path, Gym.cache[:binary_path]) unless File.expand_path(path).casecmp(File.expand_path(Gym.cache[:binary_path]).downcase).zero?
+        elsif Dir.exist?(apps_path)
+          # Try to find "generic" PKG file inside "Apps" folder, used when app thinning was set
+          files = Dir[File.join(apps_path, "*.pkg")]
+          # Generic PKG file doesn't have suffix so its name is the shortest
+          path = files.min_by(&:length)
+          Gym.cache[:binary_path] = File.join(temporary_output_path, "#{Gym.config[:output_name]}.pkg")
+          FileUtils.cp(path, Gym.cache[:binary_path]) unless File.expand_path(path).casecmp(File.expand_path(Gym.cache[:binary_path]).downcase).zero?
+        elsif app_path
+          # Try to find .app file in the output directory. This is used when macOS is set and .app is being generated.
+          Gym.cache[:binary_path] = File.join(temporary_output_path, "#{Gym.config[:output_name]}.app")
+          FileUtils.mv(app_path, Gym.cache[:binary_path]) unless File.expand_path(app_path).casecmp(File.expand_path(Gym.cache[:binary_path]).downcase).zero?
+        else
+          ErrorHandler.handle_empty_pkg unless path
+        end
+
+        Gym.cache[:binary_path]
+      end
+
+      # The path of the dSYM file for this app. Might be nil
       def dsym_path
         Dir[BuildCommandGenerator.archive_path + "/**/*.app.dSYM"].last
       end
@@ -110,16 +142,25 @@ module Gym
         Gym.cache[:apps_path] ||= File.join(temporary_output_path, "Apps")
       end
 
+      # The path to the Apps folder
+      def asset_packs_path
+        Gym.cache[:asset_packs_path] ||= File.join(temporary_output_path, "OnDemandResources")
+      end
+
+      def appstore_info_path
+        Gym.cache[:appstore_info_path] ||= File.join(temporary_output_path, "AppStoreInfo.plist")
+      end
+
       private
 
       def normalize_export_options(hash)
         # Normalize some values
-        hash[:onDemandResourcesAssetPacksBaseURL] = URI.escape(hash[:onDemandResourcesAssetPacksBaseURL]) if hash[:onDemandResourcesAssetPacksBaseURL]
+        hash[:onDemandResourcesAssetPacksBaseURL] = Addressable::URI.encode(hash[:onDemandResourcesAssetPacksBaseURL]) if hash[:onDemandResourcesAssetPacksBaseURL]
         if hash[:manifest]
-          hash[:manifest][:appURL] = URI.escape(hash[:manifest][:appURL]) if hash[:manifest][:appURL]
-          hash[:manifest][:displayImageURL] = URI.escape(hash[:manifest][:displayImageURL]) if hash[:manifest][:displayImageURL]
-          hash[:manifest][:fullSizeImageURL] = URI.escape(hash[:manifest][:fullSizeImageURL]) if hash[:manifest][:fullSizeImageURL]
-          hash[:manifest][:assetPackManifestURL] = URI.escape(hash[:manifest][:assetPackManifestURL]) if hash[:manifest][:assetPackManifestURL]
+          hash[:manifest][:appURL] = Addressable::URI.encode(hash[:manifest][:appURL]) if hash[:manifest][:appURL]
+          hash[:manifest][:displayImageURL] = Addressable::URI.encode(hash[:manifest][:displayImageURL]) if hash[:manifest][:displayImageURL]
+          hash[:manifest][:fullSizeImageURL] = Addressable::URI.encode(hash[:manifest][:fullSizeImageURL]) if hash[:manifest][:fullSizeImageURL]
+          hash[:manifest][:assetPackManifestURL] = Addressable::URI.encode(hash[:manifest][:assetPackManifestURL]) if hash[:manifest][:assetPackManifestURL]
         end
         hash
       end
@@ -158,6 +199,10 @@ module Gym
         # if we don't specify signingStyle as manual
         if Helper.xcode_at_least?("9.0") && hash[:provisioningProfiles]
           hash[:signingStyle] = 'manual'
+        end
+
+        if Gym.config[:installer_cert_name] && (Gym.project.mac? || Gym.building_mac_catalyst_for_mac?)
+          hash[:installerSigningCertificate] = Gym.config[:installer_cert_name]
         end
 
         hash[:teamID] = Gym.config[:export_team_id] if Gym.config[:export_team_id]

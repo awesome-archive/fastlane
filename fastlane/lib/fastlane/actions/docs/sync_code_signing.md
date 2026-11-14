@@ -4,9 +4,9 @@
 
 ###### Easily sync your certificates and profiles across your team
 
-A new approach to iOS code signing: Share one code signing identity across your development team to simplify your codesigning setup and prevent code signing issues.
+A new approach to iOS and macOS code signing: Share one code signing identity across your development team to simplify your codesigning setup and prevent code signing issues.
 
-_match_ is the implementation of the [https://codesigning.guide concept](https://codesigning.guide). _match_ creates all required certificates & provisioning profiles and stores them in a separate git repository. Every team member with access to the repo can use those credentials for code signing. _match_ also automatically repairs broken and expired credentials. It's the easiest way to share signing credentials across teams
+_match_ is the implementation of the [codesigning.guide concept](https://codesigning.guide). _match_ creates all required certificates & provisioning profiles and stores them in a separate git repository, Google Cloud, or Amazon S3. Every team member with access to the selected storage can use those credentials for code signing. _match_ also automatically repairs broken and expired credentials. It's the easiest way to share signing credentials across teams
 
 [More information on how to get started with codesigning](https://docs.fastlane.tools/codesigning/getting-started/)
 
@@ -49,7 +49,7 @@ For more information about the concept, visit [codesigning.guide](https://codesi
 
 |          |  match  |
 |----------|---------|
-🔄  | Automatically sync your iOS keys and profiles across all your team members using git
+🔄  | Automatically sync your iOS and macOS keys and profiles across all your team members using git
 📦  | Handle all the heavy lifting of creating and storing your certificates and profiles
 💻  | Setup codesigning on a new machine in under a minute
 🎯 | Designed to work with apps with multiple targets and bundle identifiers
@@ -73,13 +73,15 @@ fastlane match init
 
 <img src="/img/actions/match_init.gif" width="550" />
 
-You'll be asked if you want to store your code signing identities inside a **Git repo**, or on **Google Cloud**.
+You'll be asked if you want to store your code signing identities inside a **Git repo**, **Google Cloud** or **Amazon S3**.
 
 #### Git Storage
 
 Use Git Storage to store all code signing identities in a private git repo, owned and operated by you. The files will be encrypted using OpenSSL.
 
-First, enter the URL to your private (!) Git repo (You can create one for free on e.g. [GitHub](https://github.com/new) or [BitBucket](https://bitbucket.org/repo/create)). The URL you enter can be either a `https://` or a `git` URL. (If your machine is currently using SSH to authenticate with GitHub, you'll want to use a `git` URL, otherwise you may see an authentication error when you attempt to use match.) `fastlane match init` won't read or modify your certificates or profiles yet, and also won't validate your git URL.
+First, enter the URL to your private (!) Git repo (You can create one for free on e.g. [GitHub](https://github.com/new) or [BitBucket](https://bitbucket.org/repo/create)). The URL you enter can be either a `https://` or a `git` URL. `fastlane match init` won't read or modify your certificates or profiles yet, and also won't validate your git URL.
+
+You'll then be asked which branch of that repo to use, defaulting to `main` if you leave the answer blank.
 
 This will create a `Matchfile` in your current directory (or in your `./fastlane/` folder).
 
@@ -87,10 +89,74 @@ Example content (for more advanced setups check out the [fastlane section](#fast
 
 ```ruby-skip-tests
 git_url("https://github.com/fastlane/certificates")
+git_branch("main")
 
 app_identifier("tools.fastlane.app")
 username("user@fastlane.tools")
 ```
+
+##### Git Storage on GitHub
+
+If your machine is currently using SSH to authenticate with GitHub, you'll want to use a `git` URL, otherwise, you may see an authentication error when you attempt to use match. Alternatively, you can set a basic authorization for _match_ (needs git 2.31 or later):
+
+Using parameter:
+
+```
+match(git_basic_authorization: '<YOUR BASE64 KEY>')
+```
+
+Using environment variable:
+
+```
+ENV['MATCH_GIT_BASIC_AUTHORIZATION'] = '<YOUR BASE64 KEY>'
+match
+```
+
+To generate your base64 key [according to RFC 7617](https://tools.ietf.org/html/rfc7617), run this:
+
+```
+echo -n your_github_username:your_personal_access_token | base64
+```
+
+You can find more information about GitHub basic authentication and personal token generation here: [https://developer.github.com/v3/auth/#basic-authentication](https://developer.github.com/v3/auth/#basic-authentication)
+
+##### Git Storage on GitHub - Deploy keys
+
+If your machine does not have a private key set up for your certificates repository, you can give _match_ a path for one:
+
+Using parameter:
+
+```
+match(git_private_key: '<PATH TO YOUR KEY>')
+```
+
+Using environment variable:
+
+```
+ENV['MATCH_GIT_PRIVATE_KEY'] = '<PATH TO YOUR KEY>'
+match
+```
+
+You can find more information about GitHub basic authentication and personal token generation here: [https://developer.github.com/v3/auth/#basic-authentication](https://developer.github.com/v3/auth/#basic-authentication)
+
+##### Git Storage on Azure DevOps
+
+If you're running a pipeline on Azure DevOps and using git storage in a another repository on the same project, you might want to use `bearer` token authentication (needs git 2.31 or later).
+
+Using parameter:
+
+```
+match(git_bearer_authorization: '<YOUR TOKEN>')
+```
+
+Using environment variable:
+
+```
+ENV['MATCH_GIT_BEARER_AUTHORIZATION'] = '<YOUR TOKEN>'
+match
+```
+
+You can find more information about this use case here: [https://docs.microsoft.com/en-us/azure/devops/pipelines/repos/azure-repos-git?view=azure-devops&tabs=yaml#authorize-access-to-your-repositories](https://docs.microsoft.com/en-us/azure/devops/pipelines/repos/azure-repos-git?view=azure-devops&tabs=yaml#authorize-access-to-your-repositories)
 
 #### Google Cloud Storage
 
@@ -102,6 +168,18 @@ Example content (for more advanced setups check out the [fastlane section](#fast
 
 ```ruby-skip-tests
 google_cloud_bucket_name("major-key-certificates")
+```
+
+#### Amazon S3
+
+Use [Amazon S3](https://aws.amazon.com/s3/) for a fully hosted solution for your code signing identities. Certificates are stored on S3, inside a storage bucket you provide. You can also directly access the files using the web console.
+
+This will create a `Matchfile` in your current directory (or in your `./fastlane/` folder).
+
+Example content (for more advanced setups check out the [fastlane section](#fastlane)):
+
+```ruby-skip-tests
+s3_bucket("ios-certificates")
 ```
 
 ### Multiple teams
@@ -117,9 +195,9 @@ match(git_branch: "team1", username: "user@team1.com")
 match(git_branch: "team2", username: "user@team2.com")
 ```
 
-#### Google Cloud Storage
+#### Google Cloud or Amazon S3 Storage
 
-If you use Google Cloud Storage, you don't need to do anything manually. Just use Google Cloud Storage, and the top level folder will be the team ID.
+If you use Google Cloud or Amazon S3 Storage, you don't need to do anything manually. Just use Google Cloud or Amazon S3 Storage, and the top level folder will be the team ID.
 
 ### Run
 
@@ -137,10 +215,12 @@ fastlane match development
 
 <img src="/img/actions/match_appstore_small.gif" width="550" />
 
-This will create a new certificate and provisioning profile (if required) and store them in your selected storage.  
+This will create a new certificate and provisioning profile (if required) and store them in your selected storage.
 If you previously ran _match_ with the configured storage it will automatically install the existing profiles from your storage.
 
-The provisioning profiles are installed in `~/Library/MobileDevice/Provisioning Profiles` while the certificates and private keys are installed in your Keychain.
+The provisioning profiles are installed in `~/Library/Developer/Xcode/UserData/Provisioning Profiles` (`~/Library/MobileDevice/Provisioning Profiles` for Xcode versions prior to 16.0) while the certificates and private keys are installed in your Keychain.
+
+> fastlane relies on the system's default Xcode version to determine the current version. The path where provisioning profiles are stored changed in Xcode 16. If you use the `xcode_select` or `xcodes` actions and you have Xcode 15 and 16 installed in your system, please make sure to execute them before invoking the `sync_code_signing` action.  
 
 To get a more detailed output of what _match_ is doing use
 
@@ -156,7 +236,7 @@ fastlane action match
 
 #### Handle multiple targets
 
-_match_ can use the same one Git repository or Google Cloud Storage for all bundle identifiers.
+_match_ can use the same one Git repository, Google Cloud, or Amazon S3 Storage for all bundle identifiers.
 
 If you have several targets with different bundle identifiers, supply them as a comma-separated list:
 
@@ -182,7 +262,7 @@ If you want to use a single developer and/or distribution certificate for multip
 
 ```ruby-skip-tests
 git_url("https://github.com/example/example-repo.git")
-git_branch("master")
+git_branch("main")
 ```
 
 _match_ will reuse certificates and will create separate provisioning profiles for each app.
@@ -214,12 +294,14 @@ There are two cases for reading and writing certificates stored in a Google Clou
 1. Continuous integration jobs. These will authenticate to your Google Cloud project via a service account, and use a `gc_keys.json` file as credentials.
 1. Developers on a local workstation. In this case, you should choose whether everyone on your team will create their own `gc_keys.json` file, or whether you want to manage access to the bucket directly using your developers' Google accounts.
 
-When running `fastlane match init` the first time, the setup process will give you the option to create your `gc_keys.json` file. This file contains the auth credentials needed to access your Google Cloud storage bucket. Make sure to keep that file secret and never add it to version control. We recommend adding `gc_keys.json` to your `.gitignore`
+When running `fastlane match init` the first time, the setup process will give you the option to create your `gc_keys.json` file. This file contains the authentication credentials needed to access your Google Cloud storage bucket. Make sure to keep that file secret and never add it to version control. We recommend adding `gc_keys.json` to your `.gitignore`
 
 ##### Managing developer access via keys
+
 If you want to manage developer access to your certificates via authentication keys, every developer should create their own `gc_keys.json` and add the file to all their work machines. This will give the admin full control over who has read/write access to the given Storage bucket. At the same time it allows your team to revoke a single key if a file gets compromised.
 
-##### Managing developer acess via Google accounts
+##### Managing developer access via Google accounts
+
 If your developers already have Google accounts and access to your Google Cloud project, you can also manage access to the storage bucket via [Cloud Identity and Access Management (IAM)](https://cloud.google.com/storage/docs/access-control/iam). Just [set up](https://cloud.google.com/storage/docs/access-control/lists) individual developer accounts or an entire Google Group containing your team as readers and writers on your storage bucket.
 
 You can then specify the Google Cloud project id containing your storage bucket in your `Matchfile`:
@@ -319,24 +401,33 @@ lane :beta do
 end
 ```
 
-By using the `force_for_new_devices` parameter, _match_ will check if the device count has changed since the last time you ran _match_, and automatically re-generate the provisioning profile if necessary. You can also use `force: true` to re-generate the provisioning profile on each run.
+By using the `force_for_new_devices` parameter, _match_ will check if the (enabled) device count has changed since the last time you ran _match_, and automatically re-generate the provisioning profile if necessary. You can also use `force: true` to re-generate the provisioning profile on each run.
 
 _**Important:** The `force_for_new_devices` parameter is ignored for App Store provisioning profiles since they don't contain any device information._
 
-If you're not using _fastlane_, you can also use the `force_for_new_devices` option from the command line:
+If you're not using `Fastfile`, you can also use the `force_for_new_devices` option from the command line:
 
 ```no-highlight
 fastlane match adhoc --force_for_new_devices
 ```
 
-##### Templates (aka: custom entitlements)
+##### Offline profile use
 
-Match can generate profiles that contain custom entitlements by passing in the entitlement's name with the `template_name` parameter.
+If your profile requires the 'Offline support (7 day validity)' setting for use without Internet, use `offline_profile: true` to add this permission to generated profiles.
 
-```
-match(type: "development",
-      template_name: "Apple Pay Pass Suppression Development")
-```
+> [!NOTE]
+> Offline profiles can only be created when logging in with an Apple ID. Apple's App Store Connect API (`api_key` / `api_key_path`) does not support this setting, so _match_ will fail with a clear error if both are combined.
+
+##### Managed capabilities
+
+> [!IMPORTANT]
+> This feature has been deprecated since May 2025, until Apple provides a new solution. We will update this documentation once we have more information on how to handle managed capabilities in the future.
+
+Managed capabilities — formerly known as "additional entitlements" or "custom entitlements", enabled via "templates" — are additional capabilities that require Apple's review and approval before they can be distributed.
+
+These capabilities used to be enabled by passing a `template_name` parameter to the _match_ action, which would then generate a provisioning profile with the entitlements specified by the given template. However, this feature was never officially supported by Apple's API (undocumented), and they eventually removed it in May 2025 ([see issue #29498](https://github.com/fastlane/fastlane/issues/29498)). Apple still hasn't provided a replacement for this functionality.
+
+As a result, the `template_name` parameter was deprecated in the _match_ action, and it will not generate provisioning profiles with custom entitlements.
 
 ### Setup Xcode project
 
@@ -379,6 +470,10 @@ Once you've decided which approach to take, all that's left to do is to set your
 
 Accessing Google Cloud Storage from your CI system requires you to provide the `gc_keys.json` file as part of your build. How you implement this is your decision. You can inject that file during build time.
 
+#### Amazon S3 Storage access
+
+Accessing Amazon S3 Storage from your CI system requires you to provide the `s3_region`, `s3_access_key`, `s3_secret_access_key` and `s3_bucket` options (or environment variables), with keys that has read access to the bucket.
+
 ### Nuke
 
 If you never really cared about code signing and have a messy Apple Developer account with a lot of invalid, expired or Xcode managed profiles/certificates, you can use the `match nuke` command to revoke your certificates and provisioning profiles. Don't worry, apps that are already available in the App Store / TestFlight will still work. Builds distributed via Ad Hoc or Enterprise will be disabled after nuking your account, so you'll have to re-upload a new build. After clearing your account you'll start from a clean state, and you can run _match_ to generate your certificates and profiles again.
@@ -407,13 +502,38 @@ fastlane match change_password
 
 You'll be asked for the new password on all your machines on the next run.
 
-### Manual Decrypt
+### Import
 
-If you want to manually decrypt a file you can.
+To import and encrypt a certificate (`.cer`), the private key (`.p12`) and the provisioning profiles (`.mobileprovision` or `.provisionprofile`) into the _match_ repo run:
 
 ```no-highlight
-openssl aes-256-cbc -k "<password>" -in "<fileYouWantToDecryptPath>" -out "<decryptedFilePath>" -a -d
+fastlane match import
 ```
+
+You'll be prompted for the certificate (`.cer`), the private key (`.p12`) and the provisioning profiles (`.mobileprovision` or `.provisionprofile`) paths. _match_ will first validate the certificate (`.cer`) against the Developer Portal before importing the certificate, the private key and the provisioning profiles into the specified _match_ repository.
+
+However if there is no access to the developer portal but there are certificates, private keys and profiles provided, you can use the `skip_certificate_matching` option to tell _match_ not to verify the certificates. Like this:
+
+```no-highlight
+fastlane match import --skip_certificate_matching true
+```
+This will skip login to Apple Developer Portal and will import the provided certificate, private key and profile directly to the certificates repo.
+
+Please be careful when using this option and ensure the certificates and profiles match the type (development, adhoc, appstore, enterprise, developer_id) and are not revoked or expired.
+
+### Manual Decrypt
+
+If you want to manually decrypt or encrypt a file, you can use the companion script `match_file`:
+
+```no-highlight
+match_file encrypt "<fileYouWantToEncryptPath>" ["<encryptedFilePath>"]
+
+match_file decrypt "<fileYouWantToDecryptPath>" ["<decryptedFilePath>"]
+```
+
+The password will be asked interactively.
+
+_**Note:** You may need to swap double quotes `"` for single quotes `'` if your match password contains an exclamation mark `!`._
 
 #### Export Distribution Certificate and Private Key as Single .p12 File
 
@@ -422,14 +542,14 @@ _match_ stores the certificate (`.cer`) and the private key (`.p12`) files separ
 Decrypt your cert found in `certs/<type>/<unique-id>.cer` as a pem file:
 
 ```no-highlight
-openssl aes-256-cbc -k "<password>" -in "certs/<type>/<unique-id>.cer" -out "cert.der" -a -d
+openssl aes-256-cbc -k "<password>" -in "certs/<type>/<unique-id>.cer" -out "cert.der" -a -d -md [md5|sha256]
 openssl x509 -inform der -in cert.der -out cert.pem
 ```
 
 Decrypt your private key found in `certs/<type>/<unique-id>.p12` as a pem file:
 
 ```no-highlight
-openssl aes-256-cbc -k "<password>" -in "certs/distribution/<unique-id>.p12" -out "key.pem" -a -d
+openssl aes-256-cbc -k "<password>" -in "certs/distribution/<unique-id>.p12" -out "key.pem" -a -d -md [md5|sha256]
 ```
 
 Generate an encrypted p12 file with the same or new password:
@@ -448,7 +568,7 @@ Storing your private keys in a Git repo may sound off-putting at first. We did a
 
 ### Google Cloud Storage
 
-All your keys and provisioning profiles are encrypted using Google managed keys. 
+All your keys and provisioning profiles are encrypted using Google managed keys.
 
 ### What could happen if someone stole a private key?
 
@@ -458,7 +578,7 @@ What's the worst that could happen for each of the profile types?
 
 #### App Store Profiles
 
-An App Store profile can't be used for anything as long as it's not re-signed by Apple. The only way to get an app resigned is to submit an app for review which could take anywhere from 24 hours to a few days (checkout [appreviewtimes.com](http://appreviewtimes.com) for up-to-date expectations). Attackers could only submit an app for review, if they also got access to your App Store Connect credentials (which are not stored in git, but in your local keychain). Additionally you get an email notification every time a build gets uploaded to cancel the submission even before your app gets into the review stage.
+An App Store profile can't be used for anything as long as it's not re-signed by Apple. The only way to get an app resigned is to submit an app for review which could take anywhere from 24 hours to a few days. Attackers could only submit an app for review, if they also got access to your App Store Connect credentials (which are not stored in git, but in your local keychain). Additionally you get an email notification every time a build gets uploaded to cancel the submission even before your app gets into the review stage.
 
 #### Development and Ad Hoc Profiles
 

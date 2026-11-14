@@ -1,5 +1,10 @@
 describe Scan do
   describe Scan::TestResultParser do
+    it "warns that it is deprecated" do
+      expect(FastlaneCore::UI).to receive(:deprecated).with(/Scan::TestResultParser is deprecated/)
+      Scan::TestResultParser.new.parse_result(nil)
+    end
+
     it "properly parses the xcodebuild output" do
       output = "<?xml version='1.0' encoding='UTF-8'?>
       <testsuites tests='2' failures='1'>
@@ -62,6 +67,16 @@ describe Scan do
       expect(result).to eq(
         tests: 2,
         failures: 1
+      )
+    end
+
+    it "returns early if the xcodebuild output is nil" do
+      output = nil
+
+      result = Scan::TestResultParser.new.parse_result(output)
+      expect(result).to eq(
+        tests: 0,
+        failures: 0
       )
     end
   end

@@ -8,7 +8,7 @@ module Fastlane
       # rubocop:disable Metrics/PerceivedComplexity
       def self.run(params)
         oclint_path = params[:oclint_path]
-        if `which #{oclint_path}`.to_s.empty? && !Helper.test?
+        unless Helper.which(oclint_path) || Helper.test?
           UI.user_error!("You have to install oclint or provide path to oclint binary. Fore more details: ") + "http://docs.oclint.org/en/stable/intro/installation.html".yellow
         end
 
@@ -37,16 +37,16 @@ module Fastlane
         exclude_regex = ensure_regex_is_not_string!(exclude_regex)
 
         files = JSON.parse(File.read(compile_commands)).map do |compile_command|
-          file = compile_command['file']
+          # Paths taken from xcodebuild's output escape spaces with a backslash
+          file = compile_command['file'].gsub('\ ', ' ')
           File.exist?(file) ? file : File.join(compile_command['directory'], file)
         end
 
         files.uniq!
         files.select! do |file|
-          file_ruby = file.gsub('\ ', ' ')
-          File.exist?(file_ruby) and
-            (!select_regex or file_ruby =~ select_regex) and
-            (!exclude_regex or file_ruby !~ exclude_regex)
+          File.exist?(file) and
+            (!select_regex or file =~ select_regex) and
+            (!exclude_regex or file !~ exclude_regex)
         end
 
         command_prefix = [
@@ -58,7 +58,7 @@ module Fastlane
         report_type = params[:report_type]
         report_path = params[:report_path] ? params[:report_path] : 'oclint_report.' + report_type
 
-        oclint_args = ["-report-type=#{report_type}", "-o=#{report_path}"]
+        oclint_args = ["-report-type=#{report_type}", "-o=#{report_path.shellescape}"]
 
         oclint_args << "-list-enabled-rules" if params[:list_enabled_rules]
 
@@ -81,11 +81,13 @@ module Fastlane
         oclint_args << "-allow-duplicated-violations" if params[:allow_duplicated_violations]
         oclint_args << "-p #{compile_commands_dir.shellescape}"
 
+        oclint_args << "-extra-arg=#{params[:extra_arg]}" if params[:extra_arg]
+
         command = [
           command_prefix,
-          oclint_path,
+          oclint_path.shellescape,
           oclint_args,
-          '"' + files.join('" "') + '"'
+          files.shelljoin
         ].join(' ')
 
         Actions.lane_context[SharedValues::FL_OCLINT_REPORT_PATH] = File.expand_path(report_path)
@@ -127,20 +129,21 @@ module Fastlane
                                        description: 'The json compilation database, use xctool reporter \'json-compilation-database\'',
                                        default_value: 'compile_commands.json',
                                        optional: true),
-          FastlaneCore::ConfigItem.new(key: :select_reqex, # select_reqex is deprecated, remove as soon as possible
+          FastlaneCore::ConfigItem.new(key: :select_reqex,
                                        env_name: 'FL_OCLINT_SELECT_REQEX',
                                        description: 'Select all files matching this reqex',
-                                       is_string: false,
+                                       skip_type_validation: true, # allows Regex
+                                       deprecated: "Use `:select_regex` instead",
                                        optional: true),
           FastlaneCore::ConfigItem.new(key: :select_regex,
                                        env_name: 'FL_OCLINT_SELECT_REGEX',
                                        description: 'Select all files matching this regex',
-                                       is_string: false,
+                                       skip_type_validation: true, # allows Regex
                                        optional: true),
           FastlaneCore::ConfigItem.new(key: :exclude_regex,
                                        env_name: 'FL_OCLINT_EXCLUDE_REGEX',
                                        description: 'Exclude all files matching this regex',
-                                       is_string: false,
+                                       skip_type_validation: true, # allows Regex
                                        optional: true),
           FastlaneCore::ConfigItem.new(key: :report_type,
                                        env_name: 'FL_OCLINT_REPORT_TYPE',
@@ -154,7 +157,7 @@ module Fastlane
           FastlaneCore::ConfigItem.new(key: :list_enabled_rules,
                                        env_name: "FL_OCLINT_LIST_ENABLED_RULES",
                                        description: "List enabled rules",
-                                       is_string: false,
+                                       type: Boolean,
                                        default_value: false),
           FastlaneCore::ConfigItem.new(key: :rc,
                                        env_name: 'FL_OCLINT_RC',
@@ -163,48 +166,52 @@ module Fastlane
           FastlaneCore::ConfigItem.new(key: :thresholds,
                                        env_name: 'FL_OCLINT_THRESHOLDS',
                                        description: 'List of rule thresholds to override the default behavior of rules',
-                                       is_string: false,
+                                       type: Array,
                                        optional: true),
           FastlaneCore::ConfigItem.new(key: :enable_rules,
                                        env_name: 'FL_OCLINT_ENABLE_RULES',
                                        description: 'List of rules to pick explicitly',
-                                       is_string: false,
+                                       type: Array,
                                        optional: true),
           FastlaneCore::ConfigItem.new(key: :disable_rules,
                                        env_name: 'FL_OCLINT_DISABLE_RULES',
                                        description: 'List of rules to disable',
-                                       is_string: false,
+                                       type: Array,
                                        optional: true),
           FastlaneCore::ConfigItem.new(key: :max_priority_1,
-                                       env_name: 'FL_OCLINT_MAX_PRIOTITY_1',
+                                       env_names: ["FL_OCLINT_MAX_PRIOTITY_1", "FL_OCLINT_MAX_PRIORITY_1"], # The version with typo must be deprecated
                                        description: 'The max allowed number of priority 1 violations',
-                                       is_string: false,
+                                       type: Integer,
                                        optional: true),
           FastlaneCore::ConfigItem.new(key: :max_priority_2,
-                                       env_name: 'FL_OCLINT_MAX_PRIOTITY_2',
+                                       env_names: ["FL_OCLINT_MAX_PRIOTITY_2", "FL_OCLINT_MAX_PRIORITY_2"], # The version with typo must be deprecated
                                        description: 'The max allowed number of priority 2 violations',
-                                       is_string: false,
+                                       type: Integer,
                                        optional: true),
           FastlaneCore::ConfigItem.new(key: :max_priority_3,
-                                       env_name: 'FL_OCLINT_MAX_PRIOTITY_3',
+                                       env_names: ["FL_OCLINT_MAX_PRIOTITY_3", "FL_OCLINT_MAX_PRIORITY_3"], # The version with typo must be deprecated
                                        description: 'The max allowed number of priority 3 violations',
-                                       is_string: false,
+                                       type: Integer,
                                        optional: true),
           FastlaneCore::ConfigItem.new(key: :enable_clang_static_analyzer,
                                        env_name: "FL_OCLINT_ENABLE_CLANG_STATIC_ANALYZER",
                                        description: "Enable Clang Static Analyzer, and integrate results into OCLint report",
-                                       is_string: false,
+                                       type: Boolean,
                                        default_value: false),
           FastlaneCore::ConfigItem.new(key: :enable_global_analysis,
                                        env_name: "FL_OCLINT_ENABLE_GLOBAL_ANALYSIS",
                                        description: "Compile every source, and analyze across global contexts (depends on number of source files, could results in high memory load)",
-                                       is_string: false,
+                                       type: Boolean,
                                        default_value: false),
           FastlaneCore::ConfigItem.new(key: :allow_duplicated_violations,
                                        env_name: "FL_OCLINT_ALLOW_DUPLICATED_VIOLATIONS",
                                        description: "Allow duplicated violations in the OCLint report",
-                                       is_string: false,
-                                       default_value: false)
+                                       type: Boolean,
+                                       default_value: false),
+          FastlaneCore::ConfigItem.new(key: :extra_arg,
+                                       env_name: 'FL_OCLINT_EXTRA_ARG',
+                                       description: 'Additional argument to append to the compiler command line',
+                                       optional: true)
         ]
       end
       # rubocop:enable Metrics/PerceivedComplexity
@@ -249,7 +256,8 @@ module Fastlane
             list_enabled_rules: true,             # List enabled rules
             enable_clang_static_analyzer: true,   # Enable Clang Static Analyzer, and integrate results into OCLint report
             enable_global_analysis: true,         # Compile every source, and analyze across global contexts (depends on number of source files, could results in high memory load)
-            allow_duplicated_violations: true     # Allow duplicated violations in the OCLint report
+            allow_duplicated_violations: true,    # Allow duplicated violations in the OCLint report
+            extra_arg: "-Wno-everything"          # Additional argument to append to the compiler command line
           )'
         ]
       end

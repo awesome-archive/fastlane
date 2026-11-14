@@ -5,7 +5,8 @@ describe Fastlane do
   describe Fastlane::FastFile do
     describe "Update App Identifier Integration" do
       # Variables
-      let(:test_path) { "/tmp/fastlane/tests/fastlane" }
+      # Not a fixed path under /tmp: parallel rspec processes share it. See fastlane#30184.
+      let(:test_path) { Dir.mktmpdir("fl_spec_update_app_identifier") }
       let(:fixtures_path) { "./fastlane/spec/fixtures/xcodeproj" }
       let(:proj_file) { "bundle.xcodeproj" }
       let(:identifier_key) { 'PRODUCT_BUNDLE_IDENTIFIER' }
@@ -23,8 +24,6 @@ describe Fastlane do
       end
 
       before do
-        # Create test folder
-        FileUtils.mkdir_p(test_path)
         source = File.join(fixtures_path, proj_file)
         destination = File.join(test_path, proj_file)
 
@@ -49,16 +48,16 @@ describe Fastlane do
         end
 
         it "updates the xcode project when product bundle identifier in use" do
-          stub_project = 'stub project'
-          stub_configuration_1 = 'stub config 1'
-          stub_configuration_2 = 'stub config 2'
+          stub_project = +'stub project'
+          stub_configuration_1 = +'stub config 1'
+          stub_configuration_2 = +'stub config 2'
           stub_object = ['object']
           stub_settings_1 = Hash['PRODUCT_BUNDLE_IDENTIFIER', 'com.something.else']
           stub_settings_1['INFOPLIST_FILE'] = plist_path
           stub_settings_2 = Hash['PRODUCT_BUNDLE_IDENTIFIER', 'com.something.entirely.else']
           stub_settings_2['INFOPLIST_FILE'] = "Other-Info.plist"
 
-          expect(Xcodeproj::Project).to receive(:open).with('/tmp/fastlane/tests/fastlane/bundle.xcodeproj').and_return(stub_project)
+          expect(Xcodeproj::Project).to receive(:open).with(xcodeproj).and_return(stub_project)
           expect(stub_project).to receive(:objects).and_return(stub_object)
           expect(stub_object).to receive(:select).and_return([stub_configuration_1, stub_configuration_2])
           expect(stub_configuration_1).to receive(:build_settings).twice.and_return(stub_settings_1)
@@ -78,17 +77,47 @@ describe Fastlane do
           expect(stub_settings_2['PRODUCT_BUNDLE_IDENTIFIER']).to_not(eq('com.test.plist'))
         end
 
+        it "updates the xcode project when product bundle identifier in use and it uses curly brackets notation" do
+          stub_project = +'stub project'
+          stub_configuration_1 = +'stub config 1'
+          stub_configuration_2 = +'stub config 2'
+          stub_object = ['object']
+          stub_settings_1 = Hash['PRODUCT_BUNDLE_IDENTIFIER', 'com.something.else']
+          stub_settings_1['INFOPLIST_FILE'] = plist_path
+          stub_settings_2 = Hash['PRODUCT_BUNDLE_IDENTIFIER', 'com.something.entirely.else']
+          stub_settings_2['INFOPLIST_FILE'] = "Other-Info.plist"
+
+          expect(Xcodeproj::Project).to receive(:open).with(xcodeproj).and_return(stub_project)
+          expect(stub_project).to receive(:objects).and_return(stub_object)
+          expect(stub_object).to receive(:select).and_return([stub_configuration_1, stub_configuration_2])
+          expect(stub_configuration_1).to receive(:build_settings).twice.and_return(stub_settings_1)
+          expect(stub_configuration_2).to receive(:build_settings).and_return(stub_settings_2)
+          expect(stub_project).to receive(:save)
+
+          create_plist_with_identifier("${#{identifier_key}}")
+          Fastlane::FastFile.new.parse("lane :test do
+            update_app_identifier({
+              xcodeproj: '#{xcodeproj}',
+              plist_path: '#{plist_path}',
+              app_identifier: '#{app_identifier}'
+            })
+          end").runner.execute(:test)
+
+          expect(stub_settings_1['PRODUCT_BUNDLE_IDENTIFIER']).to eq('com.test.plist')
+          expect(stub_settings_2['PRODUCT_BUNDLE_IDENTIFIER']).to_not(eq('com.test.plist'))
+        end
+
         it "updates the xcode project when info plist path contains $(SRCROOT)" do
-          stub_project = 'stub project'
-          stub_configuration_1 = 'stub config 1'
-          stub_configuration_2 = 'stub config 2'
+          stub_project = +'stub project'
+          stub_configuration_1 = +'stub config 1'
+          stub_configuration_2 = +'stub config 2'
           stub_object = ['object']
           stub_settings_1 = Hash['PRODUCT_BUNDLE_IDENTIFIER', 'com.something.else']
           stub_settings_1['INFOPLIST_FILE'] = plist_path_with_srcroot
           stub_settings_2 = Hash['PRODUCT_BUNDLE_IDENTIFIER', 'com.something.entirely.else']
           stub_settings_2['INFOPLIST_FILE'] = "Other-Info.plist"
 
-          expect(Xcodeproj::Project).to receive(:open).with('/tmp/fastlane/tests/fastlane/bundle.xcodeproj').and_return(stub_project)
+          expect(Xcodeproj::Project).to receive(:open).with(xcodeproj).and_return(stub_project)
           expect(stub_project).to receive(:objects).and_return(stub_object)
           expect(stub_object).to receive(:select).and_return([stub_configuration_1, stub_configuration_2])
           expect(stub_configuration_1).to receive(:build_settings).twice.and_return(stub_settings_1)
@@ -109,16 +138,16 @@ describe Fastlane do
         end
 
         it "updates the xcode project when info plist path not contains $(SRCROOT)" do
-          stub_project = 'stub project'
-          stub_configuration_1 = 'stub config 1'
-          stub_configuration_2 = 'stub config 2'
+          stub_project = +'stub project'
+          stub_configuration_1 = +'stub config 1'
+          stub_configuration_2 = +'stub config 2'
           stub_object = ['object']
           stub_settings_1 = Hash['PRODUCT_BUNDLE_IDENTIFIER', 'com.something.else']
           stub_settings_1['INFOPLIST_FILE'] = plist_path_with_srcroot
           stub_settings_2 = Hash['PRODUCT_BUNDLE_IDENTIFIER', 'com.something.entirely.else']
           stub_settings_2['INFOPLIST_FILE'] = "Other-Info.plist"
 
-          expect(Xcodeproj::Project).to receive(:open).with('/tmp/fastlane/tests/fastlane/bundle.xcodeproj').and_return(stub_project)
+          expect(Xcodeproj::Project).to receive(:open).with(xcodeproj).and_return(stub_project)
           expect(stub_project).to receive(:objects).and_return(stub_object)
           expect(stub_object).to receive(:select).and_return([stub_configuration_1, stub_configuration_2])
           expect(stub_configuration_1).to receive(:build_settings).twice.and_return(stub_settings_1)
@@ -139,12 +168,12 @@ describe Fastlane do
         end
 
         it "should raise an exception when PRODUCT_BUNDLE_IDENTIFIER in info plist but project doesn't use this info plist" do
-          stub_project = 'stub project'
-          stub_configuration = 'stub config'
+          stub_project = +'stub project'
+          stub_configuration = +'stub config'
           stub_object = ['object']
           stub_settings = Hash['PRODUCT_BUNDLE_IDENTIFIER', 'com.something.else']
 
-          expect(Xcodeproj::Project).to receive(:open).with('/tmp/fastlane/tests/fastlane/bundle.xcodeproj').and_return(stub_project)
+          expect(Xcodeproj::Project).to receive(:open).with(xcodeproj).and_return(stub_project)
           expect(stub_project).to receive(:objects).and_return(stub_object)
           expect(stub_object).to receive(:select).and_return([stub_configuration])
           expect(stub_configuration).to receive(:build_settings).and_return(stub_settings)
@@ -162,11 +191,11 @@ describe Fastlane do
         end
 
         it "should raise an exception when PRODUCT_BUNDLE_IDENTIFIER in info plist but not project" do
-          stub_project = 'stub project'
+          stub_project = +'stub project'
           stub_configuration = 'stub config'
           stub_object = ['object']
 
-          expect(Xcodeproj::Project).to receive(:open).with('/tmp/fastlane/tests/fastlane/bundle.xcodeproj').and_return(stub_project)
+          expect(Xcodeproj::Project).to receive(:open).with(xcodeproj).and_return(stub_project)
           expect(stub_project).to receive(:objects).and_return(stub_object)
           expect(stub_object).to receive(:select).and_return([])
 
@@ -179,13 +208,12 @@ describe Fastlane do
               app_identifier: '#{app_identifier}'
             })
             end").runner.execute(:test)
-          end.to raise_error("Info plist uses $(#{identifier_key}), but xcodeproj does not")
+          end.to raise_error("Info plist uses #{identifier_key}, but xcodeproj does not")
         end
       end
 
       after do
-        # Clean up files
-        FileUtils.rm_r(test_path)
+        FileUtils.remove_entry(test_path)
       end
     end
   end

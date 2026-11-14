@@ -9,6 +9,7 @@ describe CredentialsManager do
         expect(CredentialsManager::AppfileConfig.new('credentials_manager/spec/fixtures/Appfile1').data[:app_identifier]).to eq('net.sunapps.1.beta')
         expect(CredentialsManager::AppfileConfig.new('credentials_manager/spec/fixtures/Appfile1').data[:apple_id]).to eq('felix@sunapps.net')
         expect(CredentialsManager::AppfileConfig.new('credentials_manager/spec/fixtures/Appfile1').data[:team_id]).to eq('3ECBP458CC')
+        expect(CredentialsManager::AppfileConfig.new('credentials_manager/spec/fixtures/Appfile1').data[:itc_provider]).to eq('JoshHoltz')
 
         ENV["FASTLANE_LANE_NAME"] = :enterprise.to_s
 
@@ -192,6 +193,13 @@ describe CredentialsManager do
         ENV["FASTLANE_USER"] = env_name
         expect(CredentialsManager::AppfileConfig.new('credentials_manager/spec/fixtures/Appfile9').data[:apple_id]).to eq(env_name)
         ENV.delete("DELIVER_USER")
+      end
+    end
+
+    describe "Appfile10" do
+      it "supports provider_public_id in Appfile" do
+        config = CredentialsManager::AppfileConfig.new('credentials_manager/spec/fixtures/Appfile10')
+        expect(config.data[:provider_public_id]).to eq('00000000-0000-0000-0000-000000000000')
       end
     end
 

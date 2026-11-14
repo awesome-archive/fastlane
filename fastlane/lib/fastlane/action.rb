@@ -110,7 +110,7 @@ module Fastlane
 
     # Is printed out in the Steps: output in the terminal
     # Return nil if you don't want any logging in the terminal/JUnit Report
-    def self.step_text
+    def self.step_text(params)
       self.action_name
     end
 
@@ -121,7 +121,7 @@ module Fastlane
 
     # instead of "AddGitAction", this will return "add_git" to print it to the user
     def self.action_name
-      self.name.split('::').last.gsub('Action', '').fastlane_underscore
+      self.name.split('::').last.gsub(/Action$/, '').fastlane_underscore
     end
 
     def self.lane_context
@@ -134,7 +134,7 @@ module Fastlane
       UI.user_error!("To call another action from an action use `other_action.#{method_sym}` instead")
     end
 
-    # When shelling out from the actoin, should we use `bundle exec`?
+    # When shelling out from the action, should we use `bundle exec`?
     def self.shell_out_should_use_bundle_exec?
       return File.exist?('Gemfile') && !Helper.contained_fastlane?
     end
@@ -160,15 +160,17 @@ class String
   end
 
   def markdown_sample(is_first = false)
-    self.markdown_clean_heredoc!
-    self.markdown_details(is_first)
+    sample = self.dup
+    sample.markdown_clean_heredoc!
+    sample.markdown_details(is_first)
   end
 
   def markdown_list(is_first = false)
-    self.markdown_clean_heredoc!
-    self.gsub!(/^/, "- ") # add list dashes
-    self.prepend(">") unless is_first # the empty line that will be added breaks the quote
-    self.markdown_details(is_first)
+    list = self.dup
+    list.markdown_clean_heredoc!
+    list.gsub!(/^/, "- ") # add list dashes
+    list.prepend(">") unless is_first # the empty line that will be added breaks the quote
+    list.markdown_details(is_first)
   end
 
   def markdown_details(is_first)
@@ -179,7 +181,7 @@ class String
 
   def markdown_clean_heredoc!
     self.chomp! # remove the last new line added by the heredoc
-    self.dedent! # remove the leading whitespace (similar to the squigly heredoc `<<~`)
+    self.dedent! # remove the leading whitespace (similar to the squiggly heredoc `<<~`)
   end
 
   def dedent!

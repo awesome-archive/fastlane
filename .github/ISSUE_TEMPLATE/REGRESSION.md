@@ -1,6 +1,8 @@
 ---
 name: 😱 Regression
 about: If a recent release broke a feature 😬 (Please make sure you know the last known working release version)
+title: "[Regression] "
+labels: ["status: regression"]
 
 ---
 
@@ -9,7 +11,7 @@ about: If a recent release broke a feature 😬 (Please make sure you know the l
 ### New Regression Checklist
 
 - [ ] Updated fastlane to the latest version
-- [ ] I read the [Contribution Guidelines](https://github.com/fastlane/fastlane/blob/master/CONTRIBUTING.md)
+- [ ] I read the [Contribution Guidelines](https://github.com/fastlane/fastlane/blob/master/docs/CONTRIBUTING.md)
 - [ ] I read [docs.fastlane.tools](https://docs.fastlane.tools)
 - [ ] I searched for [existing GitHub issues](https://github.com/fastlane/fastlane/issues)
 
@@ -24,7 +26,7 @@ about: If a recent release broke a feature 😬 (Please make sure you know the l
 ##### Complete output when running fastlane, including the stack trace and command used
 <!-- You can use: `--capture_output` as the last commandline argument to get that collected for you -->
 
-<!-- The output of `--capture_output` could contain sensitive data such as application ids, certificate ids, or email addreses, Please make sure you double check the output and replace anything sensitive you don't wish to submit in the issue -->
+<!-- The output of `--capture_output` could contain sensitive data such as application ids, certificate ids, or email addresses, Please make sure you double check the output and replace anything sensitive you don't wish to submit in the issue -->
 
 <details>
   <pre>[INSERT OUTPUT HERE]</pre>
